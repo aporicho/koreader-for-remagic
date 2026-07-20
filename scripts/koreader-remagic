@@ -2,36 +2,199 @@
 set -eu
 
 KOREADER_DIR=${KOREADER_DIR:-/home/root/apps/koreader}
-EINKFACE=/home/root/.paperweight/services/core/einkfaceclient
-QTFB_SHIM=/home/root/apps/remagic-koreader/lib/qtfb-shim-einkface.so
+QTFB_SHIM=${QTFB_SHIM:-/home/root/apps/remagic/shims/qtfb-shim.so}
+KOREADER_READER=${KOREADER_READER:-$KOREADER_DIR/reader.lua}
+KOREADER_LIBRARY_DIR=${KOREADER_LIBRARY_DIR:-/home/root/.local/share/remagic-koreader/library}
+KOREADER_SETTINGS=${KOREADER_SETTINGS:-$KOREADER_DIR/settings.reader.lua}
+KOREADER_MIGRATOR=${KOREADER_MIGRATOR:-/home/root/apps/remagic-koreader/libexec/koreader-data-migrate}
+KOREADER_LIBRARY_SYNC=${KOREADER_LIBRARY_SYNC:-/home/root/apps/remagic-koreader/libexec/koreader-library-sync}
+KOREADER_STARTUP_SCRIPT=${KOREADER_STARTUP_SCRIPT:-$KOREADER_DIR/koreader.sh}
+KOREADER_ACTIVE_STARTUP_SCRIPT=${KOREADER_ACTIVE_STARTUP_SCRIPT:-/tmp/koreader.sh}
 
-[ -x "$KOREADER_DIR/reader.lua" ] || { echo "KOReader reader.lua missing" >&2; exit 1; }
-[ -r "$EINKFACE" ] || { echo "einkface client missing" >&2; exit 1; }
-
-systemctl unmask --runtime xochitl.service 2>/dev/null || true
-systemctl reset-failed xochitl.service paperweight.service 2>/dev/null || true
-systemctl start paperweight.service 2>/dev/null || true
-systemctl start xochitl.service
-
-attempts=0
-while { [ ! -S /tmp/pwei-einkface.sock ] || ! pidof xochitl >/dev/null 2>&1 || ! pidof core >/dev/null 2>&1; } && [ "$attempts" -lt 80 ]; do
-    sleep 0.1
-    attempts=$((attempts + 1))
-done
-
-if [ ! -S /tmp/pwei-einkface.sock ] || ! pidof xochitl >/dev/null 2>&1 || ! pidof core >/dev/null 2>&1; then
-    echo "KOReader einkface host is not ready" >&2
+if [ ! -d "$KOREADER_DIR" ]; then
+    echo "KOReader directory missing: $KOREADER_DIR" >&2
+    exit 1
+fi
+if [ ! -x "$KOREADER_READER" ]; then
+    echo "KOReader reader.lua missing or not executable: $KOREADER_READER" >&2
+    exit 1
+fi
+if [ ! -r "$QTFB_SHIM" ]; then
+    echo "Remagic QTFB shim missing: $QTFB_SHIM" >&2
+    exit 1
+fi
+if [ ! -f "$KOREADER_STARTUP_SCRIPT" ] || [ ! -r "$KOREADER_STARTUP_SCRIPT" ]; then
+    echo "KOReader startup script missing or unreadable: $KOREADER_STARTUP_SCRIPT" >&2
+    exit 1
+fi
+if [ ! -x "$KOREADER_LIBRARY_SYNC" ]; then
+    echo "KOReader friendly library synchronizer missing: $KOREADER_LIBRARY_SYNC" >&2
     exit 1
 fi
 
-mkdir -p "$(dirname "$QTFB_SHIM")"
-ln -sf "$EINKFACE" "$QTFB_SHIM"
-export LD_PRELOAD="$QTFB_SHIM${LD_PRELOAD:+:$LD_PRELOAD}"
-export EINKFACE_WINDOW_TITLE=KOReader
-export EINKFACE_SHIM_MODEL=false
-export QTFB_SHIM_MODE=N_RGB565
-export KO_DONT_GRAB_INPUT=1
-export KO_DONT_SET_DEPTH=1
+export HOME="${HOME:-/home/root}"
+export KOREADER_DIR
+export STARDICT_DATA_DIR="${STARDICT_DATA_DIR:-data/dict}"
+# The manager knows the wrapper PID only after fork.  The shebang keeps this
+# shell in that same process, so bind KOReader's userpatch markers here before
+# reader.lua is spawned.
+export REMAGIC_APP_PID="$$"
 
-cd "$KOREADER_DIR"
-exec "$KOREADER_DIR/reader.lua" "$@"
+# A missing/empty statistics database is the broken partial-migration case seen
+# on device. Repair it before reader.lua opens it, without adding validation
+# latency to healthy launches. Full validation also runs from install-device.sh.
+if [ ! -s "$KOREADER_DIR/settings/statistics.sqlite3" ] && [ -x "$KOREADER_MIGRATOR" ]; then
+    if "$KOREADER_MIGRATOR"; then
+        :
+    else
+        migration_status=$?
+        echo "KOReader data repair failed (status=$migration_status); refusing to open an incomplete data directory" >&2
+        exit "$migration_status"
+    fi
+fi
+
+# The reMarkable backend compares /tmp/koreader.sh with the installed script
+# and asks for a complete restart when they differ. Normally upstream
+# koreader.sh refreshes that copy before it starts reader.lua; this wrapper
+# deliberately bypasses that script because its framebuffer setup is unsafe in
+# the QTFB host. Reproduce only the harmless relocalization step here.
+#
+# Build the copy beside its destination and rename it into place so reader.lua
+# can never observe a partial script. This also replaces an existing symlink
+# instead of following it while running as root.
+sync_startup_script() (
+    startup_dir=${KOREADER_ACTIVE_STARTUP_SCRIPT%/*}
+    if [ "$startup_dir" = "$KOREADER_ACTIVE_STARTUP_SCRIPT" ]; then
+        startup_dir=.
+    fi
+    if [ ! -d "$startup_dir" ]; then
+        echo "KOReader active startup directory missing: $startup_dir" >&2
+        exit 1
+    fi
+
+    umask 077
+    startup_tmp=$(mktemp "$startup_dir/.koreader-remagic.XXXXXX") || {
+        echo "Could not create temporary KOReader startup script in $startup_dir" >&2
+        exit 1
+    }
+    # This handler is invoked indirectly by the EXIT trap below.
+    # shellcheck disable=SC2329
+    cleanup_startup_tmp() {
+        if [ -n "${startup_tmp:-}" ]; then
+            rm -f "$startup_tmp"
+        fi
+    }
+    trap cleanup_startup_tmp EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    cp "$KOREADER_STARTUP_SCRIPT" "$startup_tmp"
+    chmod 0755 "$startup_tmp"
+    if ! cmp -s "$KOREADER_STARTUP_SCRIPT" "$startup_tmp"; then
+        echo "KOReader startup script copy verification failed" >&2
+        exit 1
+    fi
+    mv -f "$startup_tmp" "$KOREADER_ACTIVE_STARTUP_SCRIPT"
+    startup_tmp=
+)
+
+sync_startup_script
+
+if "$KOREADER_LIBRARY_SYNC"; then
+    :
+else
+    library_sync_status=$?
+    if [ ! -d "$KOREADER_LIBRARY_DIR" ]; then
+        echo "KOReader friendly library synchronization failed (status=$library_sync_status) and no previous view is available" >&2
+        exit "$library_sync_status"
+    fi
+    echo "KOReader friendly library synchronization failed (status=$library_sync_status); using the previous complete view" >&2
+fi
+
+select_library_dir() {
+    lastdir=
+    if [ -r "$KOREADER_SETTINGS" ]; then
+        lastdir=$(sed -n \
+            's/^[[:space:]]*\["lastdir"\][[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*,[[:space:]]*$/\1/p' \
+            "$KOREADER_SETTINGS" | sed -n '$p')
+    fi
+
+    # Only restore directories inside the generated friendly library. This
+    # prevents UUID files and .thumbnails from the xochitl store leaking into
+    # KOReader's file manager.
+    if [ -n "$lastdir" ] && [ -d "$lastdir" ]; then
+        case "$lastdir/" in
+            "$KOREADER_LIBRARY_DIR/"|"$KOREADER_LIBRARY_DIR/"*)
+                echo "koreader-remagic: library_dir=$lastdir source=lastdir" >&2
+                printf '%s\n' "$lastdir"
+                return
+                ;;
+        esac
+    fi
+
+    if [ -d "$KOREADER_LIBRARY_DIR" ]; then
+        echo "koreader-remagic: library_dir=$KOREADER_LIBRARY_DIR source=fallback" >&2
+        printf '%s\n' "$KOREADER_LIBRARY_DIR"
+        return
+    fi
+
+    echo "KOReader friendly library is unavailable: $KOREADER_LIBRARY_DIR" >&2
+    return 1
+}
+
+# Passing a directory explicitly forces KOReader into its file manager. With
+# no argument reader.lua may restore lastfile (including a thumbnail) or a
+# broad parent directory instead of the books library.
+if [ "$#" -eq 0 ]; then
+    set -- "$(select_library_dir)"
+fi
+
+child_pid=
+
+terminate_child() {
+    signal=$1
+    status=$2
+    if [ -n "$child_pid" ]; then
+        kill -"$signal" "$child_pid" 2>/dev/null || true
+        wait "$child_pid" 2>/dev/null || true
+    fi
+    exit "$status"
+}
+
+trap 'terminate_child TERM 143' TERM
+trap 'terminate_child INT 130' INT
+trap 'terminate_child HUP 129' HUP
+
+cd "$KOREADER_DIR" || exit 1
+
+# Run reader.lua directly: the upstream koreader.sh probes fbdepth/fbink and
+# /dev/fb0 before starting KOReader, none of which belongs in the QTFB host.
+# Keep LD_PRELOAD on the reader process only so shell helpers and the manager
+# itself are never shimmed.
+while :; do
+    LD_PRELOAD="$QTFB_SHIM" \
+    QTFB_SHIM_MODEL=false \
+    QTFB_SHIM_INPUT=1 \
+    QTFB_SHIM_INPUT_MODE=NATIVE \
+    QTFB_SHIM_MODE=N_RGB565 \
+    QTFB_SHIM_RESPECT_APP_REFRESH_MODES=1 \
+    QTFB_SHIM_RESPECT_FULL_REFRESH_REQUESTS=1 \
+    KO_DONT_GRAB_INPUT=1 \
+    KO_DONT_SET_DEPTH=1 \
+        "$KOREADER_READER" "$@" &
+    child_pid=$!
+
+    if wait "$child_pid"; then
+        status=0
+    else
+        status=$?
+    fi
+    child_pid=
+
+    # 85 is KOReader's intentional "restart application" result. Every other
+    # status, including a clean 0, belongs to the manager unchanged.
+    if [ "$status" -ne 85 ]; then
+        exit "$status"
+    fi
+done

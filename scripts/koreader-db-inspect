@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+
+[ "$#" -eq 1 ] || { echo "usage: koreader-db-inspect DATABASE" >&2; exit 2; }
+DB=$1
+KOREADER_DIR=${KOREADER_DIR:-/home/root/apps/koreader}
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+LUA_INSPECTOR=${KOREADER_DB_INSPECTOR_LUA:-$SCRIPT_DIR/koreader-db-inspect.lua}
+MIN_SCHEMA=${KOREADER_DB_MIN_SCHEMA:-20221111}
+MAX_SCHEMA=${KOREADER_DB_MAX_SCHEMA:-20221111}
+
+case "$MIN_SCHEMA:$MAX_SCHEMA" in
+    *[!0-9:]*|:*|*:)
+        echo "invalid supported schema range: $MIN_SCHEMA..$MAX_SCHEMA" >&2
+        exit 2
+        ;;
+esac
+[ "$MIN_SCHEMA" -le "$MAX_SCHEMA" ] || { echo "invalid supported schema range: $MIN_SCHEMA..$MAX_SCHEMA" >&2; exit 2; }
+
+[ -s "$DB" ] || { echo "invalid database: missing or empty: $DB" >&2; exit 1; }
+
+if command -v sqlite3 >/dev/null 2>&1; then
+    # immutable=1 prevents a read-only inspection from creating WAL/SHM files
+    # beside an inactive legacy database.
+    DB_URI=file:$DB?immutable=1
+    sqlite_value() {
+        sqlite3 -readonly "$DB_URI" "$1" 2>/dev/null
+    }
+
+    integrity=$(sqlite_value 'PRAGMA integrity_check;') || exit 1
+    [ "$integrity" = ok ] || { echo "invalid database: integrity_check=$integrity" >&2; exit 1; }
+    schema=$(sqlite_value 'PRAGMA user_version;') || exit 1
+    case "$schema" in
+        ''|*[!0-9]*) echo "invalid database: non-numeric schema=$schema" >&2; exit 1 ;;
+    esac
+    if [ "$schema" -lt "$MIN_SCHEMA" ] || [ "$schema" -gt "$MAX_SCHEMA" ]; then
+        # Do not run current-schema queries against an unknown schema. Its
+        # table names may legitimately differ, especially after an upgrade.
+        printf 'KOREADER_DB_UNSUPPORTED\t%s\t-1\t-1\n' "$schema"
+        exit 3
+    fi
+    relations=$(sqlite_value "SELECT count(*) FROM sqlite_master WHERE name IN ('book', 'page_stat') AND type IN ('table', 'view');") || exit 1
+    [ "$relations" -eq 2 ] || { echo "invalid database: missing book/page_stat schema" >&2; exit 1; }
+    books=$(sqlite_value 'SELECT count(*) FROM book;') || exit 1
+    pages=$(sqlite_value 'SELECT count(*) FROM page_stat;') || exit 1
+    printf 'KOREADER_DB_VALID\t%s\t%s\t%s\n' "$schema" "$books" "$pages"
+    exit 0
+fi
+
+[ -x "$KOREADER_DIR/luajit" ] || { echo "neither sqlite3 nor KOReader luajit is available" >&2; exit 1; }
+[ -r "$LUA_INSPECTOR" ] || { echo "database inspector missing: $LUA_INSPECTOR" >&2; exit 1; }
+
+cd "$KOREADER_DIR"
+KOREADER_DB_MIN_SCHEMA=$MIN_SCHEMA KOREADER_DB_MAX_SCHEMA=$MAX_SCHEMA \
+    exec "$KOREADER_DIR/luajit" "$LUA_INSPECTOR" "$DB"

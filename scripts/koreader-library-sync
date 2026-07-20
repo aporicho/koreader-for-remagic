@@ -1,0 +1,157 @@
+#!/bin/sh
+set -eu
+
+KOREADER_DIR=${KOREADER_DIR:-/home/root/apps/koreader}
+SOURCE_DIR=${KOREADER_SOURCE_LIBRARY_DIR:-/home/root/.local/share/remarkable/xochitl}
+STATE_ROOT=${KOREADER_LIBRARY_STATE_ROOT:-/home/root/.local/share/remagic-koreader}
+LIBRARY_DIR=${KOREADER_LIBRARY_DIR:-$STATE_ROOT/library}
+GENERATION_ROOT=$STATE_ROOT/.library-generations
+INDEX_FILE=$STATE_ROOT/library.index
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+INDEXER=${KOREADER_LIBRARY_INDEXER:-$SCRIPT_DIR/koreader-library-index.lua}
+LUA=${KOREADER_LIBRARY_LUA:-$KOREADER_DIR/luajit}
+FLOCK=${KOREADER_LIBRARY_FLOCK:-/usr/bin/flock}
+
+fail() {
+    echo "koreader-library-sync: $*" >&2
+    exit 1
+}
+
+[ -d "$SOURCE_DIR" ] || fail "source library is missing: $SOURCE_DIR"
+[ -x "$LUA" ] || fail "KOReader Lua interpreter is missing: $LUA"
+[ -r "$INDEXER" ] || fail "library indexer is missing: $INDEXER"
+[ -x "$FLOCK" ] || fail "lock helper is missing: $FLOCK"
+[ "$LIBRARY_DIR" = "$STATE_ROOT/library" ] || fail "library path must be STATE_ROOT/library"
+[ ! -L "$STATE_ROOT" ] || fail "state root must not be a symbolic link"
+
+mkdir -p "$STATE_ROOT"
+[ ! -L "$GENERATION_ROOT" ] || fail "generation root must not be a symbolic link"
+mkdir -p "$GENERATION_ROOT"
+
+LOCK_FILE=$STATE_ROOT/.library-sync.lock
+[ ! -L "$LOCK_FILE" ] || fail "library lock must not be a symbolic link"
+exec 8>"$LOCK_FILE"
+"$FLOCK" -x 8
+
+manifest_tmp=
+stage_dir=
+new_generation=
+link_tmp=
+
+remove_generated_tree() {
+    path=$1
+    case "$path" in
+        "$GENERATION_ROOT"/.staging.*|"$GENERATION_ROOT"/generation.*)
+            if [ -L "$path" ]; then
+                rm -f "$path"
+            else
+                rm -rf "$path"
+            fi
+            ;;
+        *)
+            fail "refusing to clean path outside the generated library: $path"
+            ;;
+    esac
+}
+
+cleanup() {
+    [ -z "$manifest_tmp" ] || rm -f "$manifest_tmp"
+    [ -z "$link_tmp" ] || rm -f "$link_tmp"
+    [ -z "$stage_dir" ] || remove_generated_tree "$stage_dir"
+    [ -z "$new_generation" ] || remove_generated_tree "$new_generation"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# A killed process may leave only its private staging directory. Kernel flock
+# guarantees that no live synchronizer can own one while this cleanup runs.
+for stale_stage in "$GENERATION_ROOT"/.staging.*; do
+    if [ -e "$stale_stage" ] || [ -L "$stale_stage" ]; then
+        remove_generated_tree "$stale_stage"
+    fi
+done
+
+manifest_tmp=$(mktemp "$STATE_ROOT/.library-index.XXXXXX")
+set --
+for metadata in "$SOURCE_DIR"/*.metadata; do
+    [ -f "$metadata" ] || continue
+    set -- "$@" "$metadata"
+done
+KOREADER_JSON_DIR=${KOREADER_JSON_DIR:-$KOREADER_DIR/common}
+export KOREADER_DIR KOREADER_JSON_DIR
+"$LUA" "$INDEXER" "$SOURCE_DIR" "$@" >"$manifest_tmp"
+
+library_target=
+if [ -L "$LIBRARY_DIR" ]; then
+    library_target=$(readlink "$LIBRARY_DIR" 2>/dev/null || true)
+    target_id=${library_target#.library-generations/generation.}
+    case "$library_target:$target_id" in
+        .library-generations/generation.*:*[!A-Za-z0-9._-]*) library_target= ;;
+        .library-generations/generation.*:*)
+            [ -d "$STATE_ROOT/$library_target" ] || library_target=
+            ;;
+        *) library_target= ;;
+    esac
+fi
+
+# Most launches take this path: parsing a few small metadata files and one
+# comparison, without rewriting the view or touching the source library.
+if [ -n "$library_target" ] && [ -f "$INDEX_FILE" ] && [ ! -L "$INDEX_FILE" ] && \
+    cmp -s "$manifest_tmp" "$INDEX_FILE"
+then
+    echo "koreader-library-sync: friendly library is current" >&2
+    exit 0
+fi
+
+stage_dir=$(mktemp -d "$GENERATION_ROOT/.staging.XXXXXX")
+tab=$(printf '\t')
+book_count=0
+while IFS="$tab" read -r uuid extension filename; do
+    case "$uuid" in
+        \#*) continue ;;
+        ''|*[!0-9A-Fa-f-]*) fail "invalid UUID emitted by indexer" ;;
+    esac
+    case "$extension" in
+        epub|pdf) ;;
+        *) fail "invalid extension emitted by indexer" ;;
+    esac
+    case "$filename" in
+        ''|.|..|*/*) fail "unsafe filename emitted by indexer" ;;
+    esac
+    source_file=$SOURCE_DIR/$uuid.$extension
+    [ -f "$source_file" ] || fail "source document changed during synchronization: $source_file"
+    ln -s "$source_file" "$stage_dir/$filename"
+    book_count=$((book_count + 1))
+done <"$manifest_tmp"
+
+stage_id=${stage_dir##*/.staging.}
+new_generation=$GENERATION_ROOT/generation.$stage_id
+mv "$stage_dir" "$new_generation"
+stage_dir=
+
+link_tmp=$STATE_ROOT/.library-link.$stage_id
+ln -s ".library-generations/generation.$stage_id" "$link_tmp"
+if [ -e "$LIBRARY_DIR" ] && [ ! -L "$LIBRARY_DIR" ]; then
+    fail "refusing to replace a non-symlink library path: $LIBRARY_DIR"
+fi
+"$LUA" "$INDEXER" --atomic-rename "$link_tmp" "$LIBRARY_DIR"
+link_tmp=
+
+# The new generation is now visible. Publish its manifest afterward; a crash
+# between these two renames only causes a harmless rebuild on the next launch.
+active_generation=$new_generation
+new_generation=
+"$LUA" "$INDEXER" --atomic-rename "$manifest_tmp" "$INDEX_FILE"
+manifest_tmp=
+
+for old_generation in "$GENERATION_ROOT"/generation.*; do
+    if { [ -e "$old_generation" ] || [ -L "$old_generation" ]; } && \
+        [ "$old_generation" != "$active_generation" ]
+    then
+        remove_generated_tree "$old_generation"
+    fi
+done
+
+echo "koreader-library-sync: published $book_count friendly books" >&2

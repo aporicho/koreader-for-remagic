@@ -1,0 +1,339 @@
+#!/bin/sh
+set -eu
+
+KOREADER_DIR=${KOREADER_DIR:-/home/root/apps/koreader}
+KOREADER_DATA_DIR=${KOREADER_DATA_DIR:-$KOREADER_DIR}
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+DB_INSPECTOR=${KOREADER_DB_INSPECTOR:-$SCRIPT_DIR/koreader-db-inspect}
+LEGACY_DATA_DIRS=${KOREADER_LEGACY_DATA_DIRS:-/home/root/.paperweight/services/koreader/koreader:/home/root/.config/koreader}
+BACKUP_ROOT=${KOREADER_BACKUP_ROOT:-/home/root/.local/state/remagic-koreader/backups}
+TARGET_SETTINGS=$KOREADER_DATA_DIR/settings
+TARGET_DB=$TARGET_SETTINGS/statistics.sqlite3
+USER_DATA_PATHS="settings.reader.lua settings.reader.lua.old history.lua defaults.custom.lua settings docsettings hashdocsettings history screenshots styletweaks sync"
+FLOCK=${KOREADER_FLOCK:-/usr/bin/flock}
+
+[ -x "$DB_INSPECTOR" ] || { echo "KOReader database inspector missing: $DB_INSPECTOR" >&2; exit 1; }
+[ -x "$FLOCK" ] || { echo "KOReader migration lock helper missing: $FLOCK" >&2; exit 1; }
+mkdir -p "$TARGET_SETTINGS" "$BACKUP_ROOT"
+
+LOCK_DIR=$KOREADER_DATA_DIR/.remagic-data-migrate.lock
+LOCK_GUARD=$KOREADER_DATA_DIR/.remagic-data-migrate.guard
+LOCK_OWNER=remagic-koreader-data-migrate
+LOCK_HELD=0
+
+# flock only serializes the very short inspect/reclaim/create transaction. The
+# PID-aware directory remains visible for the entire migration. Kernel flock
+# state disappears after SIGKILL or power loss, so two recovery attempts can
+# never concurrently remove or replace the same stale directory.
+exec 9>"$LOCK_GUARD"
+if ! "$FLOCK" -x -n 9; then
+    echo "KOReader data migration lock is being inspected by another process" >&2
+    exit 75
+fi
+
+if [ -d "$LOCK_DIR" ]; then
+    lock_pid=
+    [ ! -r "$LOCK_DIR/pid" ] || lock_pid=$(sed -n '1p' "$LOCK_DIR/pid" 2>/dev/null || true)
+    case "$lock_pid" in
+        ''|*[!0-9]*|0|1) lock_live=0 ;;
+        *)
+            if kill -0 "$lock_pid" 2>/dev/null; then
+                lock_live=1
+            else
+                lock_live=0
+            fi
+            ;;
+    esac
+    if [ "$lock_live" -eq 1 ]; then
+        lock_owner=unknown
+        [ ! -r "$LOCK_DIR/owner" ] || lock_owner=$(sed -n '1p' "$LOCK_DIR/owner" 2>/dev/null || printf unknown)
+        "$FLOCK" -u 9
+        echo "KOReader data migration is already running (owner=$lock_owner pid=$lock_pid)" >&2
+        exit 75
+    fi
+
+    echo "Removing stale KOReader data migration lock (pid=${lock_pid:-missing})" >&2
+    rm -rf "$LOCK_DIR"
+fi
+
+mkdir "$LOCK_DIR"
+LOCK_HELD=1
+printf '%s\n' "$LOCK_OWNER" >"$LOCK_DIR/owner"
+printf '%s\n' "$$" >"$LOCK_DIR/pid"
+"$FLOCK" -u 9
+
+tmp_db=
+cleanup() {
+    [ -z "$tmp_db" ] || rm -f "$tmp_db"
+    if [ "$LOCK_HELD" -eq 1 ]; then
+        "$FLOCK" -x 9
+        current_pid=
+        [ ! -r "$LOCK_DIR/pid" ] || current_pid=$(sed -n '1p' "$LOCK_DIR/pid" 2>/dev/null || true)
+        if [ "$current_pid" = "$$" ] || [ -z "$current_pid" ]; then
+            rm -rf "$LOCK_DIR"
+        fi
+        "$FLOCK" -u 9
+        LOCK_HELD=0
+    fi
+    exec 9>&-
+}
+trap cleanup EXIT HUP INT TERM
+
+stamp=$(date +%Y%m%d-%H%M%S 2>/dev/null || printf unknown)
+run_backup=$BACKUP_ROOT/$stamp-$$
+backup_created=0
+
+file_mtime() {
+    stat -c %Y "$1" 2>/dev/null || printf '0\n'
+}
+
+inspect_db() {
+    local output marker
+    output=$($DB_INSPECTOR "$1" 2>/dev/null) || return 1
+    marker=$(printf '%s\n' "$output" | awk -F '\t' '$1 == "KOREADER_DB_VALID" && NF >= 4 { print $2 "\t" $3 "\t" $4; exit }')
+    [ -n "$marker" ] || return 1
+    printf '%s\n' "$marker"
+}
+
+inspect_unsupported_db() {
+    local output status marker
+    if output=$($DB_INSPECTOR "$1" 2>/dev/null); then
+        return 1
+    else
+        status=$?
+    fi
+    [ "$status" -eq 3 ] || return 1
+    marker=$(printf '%s\n' "$output" | awk -F '\t' '$1 == "KOREADER_DB_UNSUPPORTED" && NF >= 4 { print $2 "\t" $3 "\t" $4; exit }')
+    [ -n "$marker" ] || return 1
+    printf '%s\n' "$marker"
+}
+
+path_exists() {
+    [ -e "$1" ] || [ -L "$1" ]
+}
+
+backup_active_data() {
+    local name source_path
+    [ "$backup_created" -eq 0 ] || return 0
+    mkdir -p "$run_backup/data"
+    for name in $USER_DATA_PATHS; do
+        source_path=$KOREADER_DATA_DIR/$name
+        path_exists "$source_path" || continue
+        cp -a "$source_path" "$run_backup/data/$name"
+    done
+    backup_created=1
+    echo "KOReader user data backup: $run_backup" >&2
+}
+
+copy_missing_path() {
+    local source_path target_path relative_path source_child child_name
+    source_path=$1
+    target_path=$2
+    relative_path=$3
+
+    case "$relative_path" in
+        settings/statistics.sqlite3|settings/statistics.sqlite3.*|settings/statistics.sqlite3-*)
+            return 0
+            ;;
+    esac
+
+    if [ -d "$source_path" ] && [ ! -L "$source_path" ]; then
+        if path_exists "$target_path" && { [ ! -d "$target_path" ] || [ -L "$target_path" ]; }; then
+            echo "Skipping KOReader user-data directory blocked by existing path: $target_path" >&2
+            return 0
+        fi
+        if ! path_exists "$target_path"; then
+            backup_active_data
+            mkdir -p "$target_path"
+        fi
+        for source_child in "$source_path"/* "$source_path"/.[!.]* "$source_path"/..?*; do
+            path_exists "$source_child" || continue
+            child_name=${source_child##*/}
+            copy_missing_path "$source_child" "$target_path/$child_name" "$relative_path/$child_name"
+        done
+        return 0
+    fi
+
+    if ! path_exists "$target_path"; then
+        backup_active_data
+        mkdir -p "${target_path%/*}"
+        cp -a "$source_path" "$target_path"
+    fi
+}
+
+copy_missing_user_data() {
+    local source_dir name source_path
+    source_dir=$1
+    [ -d "$source_dir" ] || return 0
+    [ "$source_dir" != "$KOREADER_DATA_DIR" ] || return 0
+
+    for name in $USER_DATA_PATHS; do
+        source_path=$source_dir/$name
+        path_exists "$source_path" || continue
+        copy_missing_path "$source_path" "$KOREADER_DATA_DIR/$name" "$name"
+    done
+}
+
+best_db=
+best_schema=0
+best_books=-1
+best_pages=-1
+best_mtime=0
+
+consider_candidate() {
+    local candidate metadata old_ifs schema books pages mtime
+    candidate=$1
+    [ -f "$candidate" ] || return 0
+    [ "$candidate" != "$TARGET_DB" ] || return 0
+
+    # A live WAL cannot be copied safely as a standalone file. Legacy sources
+    # are expected to be inactive; skip rather than risk losing committed rows.
+    if [ -s "$candidate-wal" ]; then
+        echo "Skipping KOReader database with a live WAL: $candidate" >&2
+        return 0
+    fi
+
+    metadata=$(inspect_db "$candidate") || return 0
+    old_ifs=$IFS
+    IFS='	'
+    set -- $metadata
+    IFS=$old_ifs
+    schema=$1
+    books=$2
+    pages=$3
+    mtime=$(file_mtime "$candidate")
+
+    if [ "$pages" -gt "$best_pages" ] || \
+       { [ "$pages" -eq "$best_pages" ] && [ "$books" -gt "$best_books" ]; } || \
+       { [ "$pages" -eq "$best_pages" ] && [ "$books" -eq "$best_books" ] && [ "$mtime" -gt "$best_mtime" ]; }
+    then
+        best_db=$candidate
+        best_schema=$schema
+        best_books=$books
+        best_pages=$pages
+        best_mtime=$mtime
+    fi
+}
+
+# Existing backups beside the target are candidates too, followed by legacy
+# installations. The richest valid page history wins, then book count, then
+# modification time.
+for candidate in "$TARGET_SETTINGS"/statistics.sqlite3.bkp.*; do
+    [ -e "$candidate" ] || continue
+    consider_candidate "$candidate"
+done
+
+old_ifs=$IFS
+IFS=:
+for source_dir in $LEGACY_DATA_DIRS; do
+    IFS=$old_ifs
+    consider_candidate "$source_dir/settings/statistics.sqlite3"
+    IFS=:
+done
+IFS=$old_ifs
+
+target_valid=0
+target_schema=0
+target_books=-1
+target_pages=-1
+target_mtime=0
+target_protected=0
+target_unsupported=0
+if [ -s "$TARGET_DB-wal" ]; then
+    # A non-empty WAL may contain the newest committed reading activity.
+    # Immutable inspection intentionally ignores it, so preserve this target
+    # instead of making a potentially destructive recovery decision.
+    target_valid=1
+    target_protected=1
+    target_mtime=$(file_mtime "$TARGET_DB-wal")
+elif target_metadata=$(inspect_db "$TARGET_DB"); then
+    target_valid=1
+    old_ifs=$IFS
+    IFS='	'
+    set -- $target_metadata
+    IFS=$old_ifs
+    target_schema=$1
+    target_books=$2
+    target_pages=$3
+    target_mtime=$(file_mtime "$TARGET_DB")
+elif target_metadata=$(inspect_unsupported_db "$TARGET_DB"); then
+    # An intact database from an unknown KOReader schema is not a recovery
+    # source, but it is still authoritative current user data. Never downgrade
+    # it to a legacy database that this adapter merely happens to understand.
+    target_valid=1
+    target_protected=1
+    target_unsupported=1
+    old_ifs=$IFS
+    IFS='	'
+    set -- $target_metadata
+    IFS=$old_ifs
+    target_schema=$1
+    target_books=$2
+    target_pages=$3
+    target_mtime=$(file_mtime "$TARGET_DB")
+fi
+
+replace_reason=
+if [ "$target_valid" -eq 0 ]; then
+    if [ -n "$best_db" ]; then
+        replace_reason=recovered
+    elif [ -e "$TARGET_DB" ]; then
+        replace_reason=isolate-only
+    fi
+fi
+
+if [ "$replace_reason" = recovered ]; then
+    backup_active_data
+    tmp_db=$TARGET_DB.remagic-new.$$
+    cp -p "$best_db" "$tmp_db"
+    inspect_db "$tmp_db" >/dev/null || { echo "Copied KOReader database failed validation" >&2; exit 1; }
+
+    if [ -e "$TARGET_DB" ]; then
+        isolated=$TARGET_DB.invalid.$stamp
+        [ ! -e "$isolated" ] || isolated=$isolated.$$
+        mv "$TARGET_DB" "$isolated"
+        for suffix in -wal -shm; do
+            [ ! -e "$TARGET_DB$suffix" ] || mv "$TARGET_DB$suffix" "$isolated$suffix"
+        done
+    fi
+    mv "$tmp_db" "$TARGET_DB"
+    tmp_db=
+    chmod 0600 "$TARGET_DB"
+    echo "KOReader statistics restored from $best_db (schema=$best_schema books=$best_books pages=$best_pages)" >&2
+elif [ "$replace_reason" = isolate-only ]; then
+    backup_active_data
+    isolated=$TARGET_DB.invalid.$stamp
+    [ ! -e "$isolated" ] || isolated=$isolated.$$
+    mv "$TARGET_DB" "$isolated"
+    for suffix in -wal -shm; do
+        [ ! -e "$TARGET_DB$suffix" ] || mv "$TARGET_DB$suffix" "$isolated$suffix"
+    done
+    echo "Invalid KOReader statistics database isolated; KOReader will create a clean database" >&2
+fi
+
+# Merge only files that are missing. Start with the selected data tree so a
+# richer source wins, then fill remaining gaps from other installations.
+if [ -n "$best_db" ]; then
+    best_data_dir=${best_db%/settings/statistics.sqlite3}
+    if [ "$best_data_dir" != "$best_db" ]; then
+        copy_missing_user_data "$best_data_dir"
+    fi
+fi
+old_ifs=$IFS
+IFS=:
+for source_dir in $LEGACY_DATA_DIRS; do
+    IFS=$old_ifs
+    copy_missing_user_data "$source_dir"
+    IFS=:
+done
+IFS=$old_ifs
+
+if [ "$target_protected" -eq 1 ]; then
+    if [ "$target_unsupported" -eq 1 ]; then
+        echo "KOReader statistics kept because schema $target_schema is unsupported by this migrator" >&2
+    else
+        echo "KOReader statistics kept because a live WAL is present" >&2
+    fi
+elif [ "$target_valid" -eq 1 ] && [ -z "$replace_reason" ]; then
+    echo "KOReader statistics kept (schema=$target_schema books=$target_books pages=$target_pages)" >&2
+fi
