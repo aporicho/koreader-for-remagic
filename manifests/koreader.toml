@@ -1,0 +1,18 @@
+schema = 1
+id = "koreader"
+name = "KOReader"
+description = "Paper Pro Move 独立电子书阅读器"
+version = "2026.03"
+exec = "/home/root/apps/remagic-koreader/bin/koreader-remagic"
+working_dir = "/home/root/apps/koreader"
+display = "einkface"
+park_strategy = "restart"
+supports_open_path = true
+allowed_open_roots = [
+  "/home/root/books",
+  "/home/root/.local/share/remarkable/xochitl",
+]
+
+[environment]
+HOME = "/home/root"
+KO_MULTIUSER = "1"

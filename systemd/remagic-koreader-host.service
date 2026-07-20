@@ -1,0 +1,8 @@
+[Unit]
+Description=KOReader Paper Pro Move display host
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true

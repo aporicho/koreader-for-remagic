@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+KOREADER_DIR=${KOREADER_DIR:-/home/root/apps/koreader}
+EINKFACE=/home/root/.paperweight/services/core/einkfaceclient
+QTFB_SHIM=/home/root/apps/remagic-koreader/lib/qtfb-shim-einkface.so
+
+[ -x "$KOREADER_DIR/reader.lua" ] || { echo "KOReader reader.lua missing" >&2; exit 1; }
+[ -r "$EINKFACE" ] || { echo "einkface client missing" >&2; exit 1; }
+
+systemctl unmask --runtime xochitl.service 2>/dev/null || true
+systemctl reset-failed xochitl.service paperweight.service 2>/dev/null || true
+systemctl start paperweight.service 2>/dev/null || true
+systemctl start xochitl.service
+
+attempts=0
+while { [ ! -S /tmp/pwei-einkface.sock ] || ! pidof xochitl >/dev/null 2>&1 || ! pidof core >/dev/null 2>&1; } && [ "$attempts" -lt 80 ]; do
+    sleep 0.1
+    attempts=$((attempts + 1))
+done
+
+if [ ! -S /tmp/pwei-einkface.sock ] || ! pidof xochitl >/dev/null 2>&1 || ! pidof core >/dev/null 2>&1; then
+    echo "KOReader einkface host is not ready" >&2
+    exit 1
+fi
+
+mkdir -p "$(dirname "$QTFB_SHIM")"
+ln -sf "$EINKFACE" "$QTFB_SHIM"
+export LD_PRELOAD="$QTFB_SHIM${LD_PRELOAD:+:$LD_PRELOAD}"
+export EINKFACE_WINDOW_TITLE=KOReader
+export EINKFACE_SHIM_MODEL=false
+export QTFB_SHIM_MODE=N_RGB565
+export KO_DONT_GRAB_INPUT=1
+export KO_DONT_SET_DEPTH=1
+
+cd "$KOREADER_DIR"
+exec "$KOREADER_DIR/reader.lua" "$@"
