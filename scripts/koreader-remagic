@@ -4,12 +4,26 @@ set -eu
 KOREADER_DIR=${KOREADER_DIR:-/home/root/apps/koreader}
 QTFB_SHIM=${QTFB_SHIM:-/home/root/apps/remagic/shims/qtfb-shim.so}
 KOREADER_READER=${KOREADER_READER:-$KOREADER_DIR/reader.lua}
+KOREADER_DATA_DIR=${KOREADER_DATA_DIR:-${KO_HOME:-/home/root/.local/share/remagic-koreader/data}}
 KOREADER_LIBRARY_DIR=${KOREADER_LIBRARY_DIR:-/home/root/.local/share/remagic-koreader/library}
-KOREADER_SETTINGS=${KOREADER_SETTINGS:-$KOREADER_DIR/settings.reader.lua}
+KOREADER_SETTINGS=${KOREADER_SETTINGS:-$KOREADER_DATA_DIR/settings.reader.lua}
 KOREADER_MIGRATOR=${KOREADER_MIGRATOR:-/home/root/apps/remagic-koreader/libexec/koreader-data-migrate}
 KOREADER_LIBRARY_SYNC=${KOREADER_LIBRARY_SYNC:-/home/root/apps/remagic-koreader/libexec/koreader-library-sync}
+KOREADER_LIFECYCLE_HELPER=${KOREADER_LIFECYCLE_HELPER:-/home/root/apps/remagic-koreader/libexec/koreader-lifecycle}
+KOREADER_PLATFORM_PATCH_DIR=${KOREADER_PLATFORM_PATCH_DIR:-/home/root/apps/remagic-koreader/share/patches}
 KOREADER_STARTUP_SCRIPT=${KOREADER_STARTUP_SCRIPT:-$KOREADER_DIR/koreader.sh}
 KOREADER_ACTIVE_STARTUP_SCRIPT=${KOREADER_ACTIVE_STARTUP_SCRIPT:-/tmp/koreader.sh}
+KOREADER_INSTALL_LOCK=${KOREADER_INSTALL_LOCK:-/home/root/apps/.remagic-koreader.install.lock}
+KOREADER_INSTALL_FLOCK=${KOREADER_INSTALL_FLOCK:-/usr/bin/flock}
+
+# DataStorage reads KO_HOME while the adapter and migration helpers use
+# KOREADER_DATA_DIR.  Accept KO_HOME as the fallback when it is the only
+# override, but never allow the two names to point at different trees.
+if [ -n "${KO_HOME:-}" ] && [ "$KO_HOME" != "$KOREADER_DATA_DIR" ]; then
+    echo "KO_HOME and KOREADER_DATA_DIR must identify the same data root" >&2
+    exit 1
+fi
+KO_HOME=$KOREADER_DATA_DIR
 
 if [ ! -d "$KOREADER_DIR" ]; then
     echo "KOReader directory missing: $KOREADER_DIR" >&2
@@ -31,19 +45,143 @@ if [ ! -x "$KOREADER_LIBRARY_SYNC" ]; then
     echo "KOReader friendly library synchronizer missing: $KOREADER_LIBRARY_SYNC" >&2
     exit 1
 fi
+if [ ! -x "$KOREADER_LIFECYCLE_HELPER" ]; then
+    echo "KOReader lifecycle adapter missing: $KOREADER_LIFECYCLE_HELPER" >&2
+    exit 1
+fi
+if [ ! -x "$KOREADER_INSTALL_FLOCK" ]; then
+    echo "KOReader deployment lock helper missing: $KOREADER_INSTALL_FLOCK" >&2
+    exit 1
+fi
+for platform_patch in 1-remagic-storage.lua 2-remagic-runtime.lua; do
+    if [ ! -r "$KOREADER_PLATFORM_PATCH_DIR/$platform_patch" ]; then
+        echo "KOReader platform userpatch missing: $KOREADER_PLATFORM_PATCH_DIR/$platform_patch" >&2
+        exit 1
+    fi
+done
 
 export HOME="${HOME:-/home/root}"
 export KOREADER_DIR
-export STARDICT_DATA_DIR="${STARDICT_DATA_DIR:-data/dict}"
+export KOREADER_DATA_DIR
+# Upstream KOReader's datastorage module uses KO_HOME as its writable data
+# root while continuing to load the program and assets from KOREADER_DIR.
+# Production defaults remain byte-for-byte compatible; acceptance tests use
+# this boundary to keep settings and databases away from real reading data.
+export KO_HOME
+export STARDICT_DATA_DIR="${STARDICT_DATA_DIR:-$KOREADER_DATA_DIR/data/dict}"
+export REMAGIC_APP_ID="${REMAGIC_APP_ID:-koreader}"
+export REMAGIC_KOREADER_LIFECYCLE_HELPER="$KOREADER_LIFECYCLE_HELPER"
+export REMAGIC_ALLOWED_OPEN_ROOTS="${REMAGIC_ALLOWED_OPEN_ROOTS:-${KOREADER_ALLOWED_OPEN_ROOTS:-/home/root/.local/share/remagic-koreader/library:/home/root/books:/home/root/koreader:/home/root/.local/share/remarkable/xochitl}}"
 # The manager knows the wrapper PID only after fork.  The shebang keeps this
 # shell in that same process, so bind KOReader's userpatch markers here before
 # reader.lua is spawned.
 export REMAGIC_APP_PID="$$"
 
+acquire_deployment_read_lock() {
+    case "$KOREADER_INSTALL_LOCK" in
+        /*) ;;
+        *) echo "KOReader deployment lock path must be absolute: $KOREADER_INSTALL_LOCK" >&2; return 1 ;;
+    esac
+    lock_parent=${KOREADER_INSTALL_LOCK%/*}
+    [ -d "$lock_parent" ] && [ ! -L "$lock_parent" ] || {
+        echo "KOReader deployment lock parent is unsafe: $lock_parent" >&2
+        return 1
+    }
+    [ ! -L "$KOREADER_INSTALL_LOCK" ] || {
+        echo "KOReader deployment lock must not be a symlink: $KOREADER_INSTALL_LOCK" >&2
+        return 1
+    }
+    if [ -e "$KOREADER_INSTALL_LOCK" ] && [ ! -f "$KOREADER_INSTALL_LOCK" ]; then
+        echo "KOReader deployment lock is not a regular file: $KOREADER_INSTALL_LOCK" >&2
+        return 1
+    fi
+
+    previous_umask=$(umask)
+    umask 077
+    # The lifecycle descriptor can legitimately be any inherited FD. Use the
+    # other high POSIX descriptor so acquiring the lock never closes it.
+    if [ "${REMAGIC_LIFECYCLE_FD:-}" = 9 ]; then
+        exec 8>>"$KOREADER_INSTALL_LOCK"
+        deployment_lock_fd=8
+    else
+        exec 9>>"$KOREADER_INSTALL_LOCK"
+        deployment_lock_fd=9
+    fi
+    umask "$previous_umask"
+    chmod 0600 "$KOREADER_INSTALL_LOCK"
+    "$KOREADER_INSTALL_FLOCK" -s -n "$deployment_lock_fd" || {
+        echo "KOReader deployment is in progress; refusing to launch" >&2
+        return 1
+    }
+}
+
+# The standalone installer holds this same inode exclusively for its complete
+# transaction. Holding a shared lock for the wrapper lifetime closes the race
+# between a process-table check and a concurrent Manager launch.
+acquire_deployment_read_lock
+
+cleanup_lifecycle() {
+    "$KOREADER_LIFECYCLE_HELPER" cleanup >/dev/null 2>&1 || true
+}
+
+# KOReader loads userpatches from DataStorage:getDataDir()/patches, not from
+# the immutable program tree when KO_HOME is redirected. Keep the authoritative
+# platform patch in the adapter and atomically mirror it into the active data
+# root before reader.lua starts. This is required both for ordinary launches
+# and for isolated device acceptance, where touching real reading data is
+# forbidden.
+sync_one_platform_patch() (
+    patch_source=$1
+    patch_target=$2
+    patch_dir=${patch_target%/*}
+    if [ -f "$patch_target" ] && cmp -s "$patch_source" "$patch_target"; then
+        exit 0
+    fi
+
+    umask 077
+    patch_tmp=$(mktemp "$patch_dir/.2-remagic-runtime.XXXXXX") || {
+        echo "Could not stage KOReader lifecycle userpatch in $patch_dir" >&2
+        exit 1
+    }
+    cleanup_patch_tmp() {
+        [ -z "${patch_tmp:-}" ] || rm -f "$patch_tmp"
+    }
+    trap cleanup_patch_tmp EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    cp "$patch_source" "$patch_tmp"
+    chmod 0644 "$patch_tmp"
+    cmp -s "$patch_source" "$patch_tmp" || {
+        echo "KOReader platform userpatch verification failed" >&2
+        exit 1
+    }
+    mv -f "$patch_tmp" "$patch_target"
+    patch_tmp=
+)
+
+sync_platform_patches() {
+    patch_dir=$KOREADER_DATA_DIR/patches
+    if [ -L "$patch_dir" ]; then
+        echo "KOReader patch directory must not be a symlink: $patch_dir" >&2
+        return 1
+    fi
+    mkdir -p "$patch_dir"
+    for platform_patch in 1-remagic-storage.lua 2-remagic-runtime.lua; do
+        sync_one_platform_patch \
+            "$KOREADER_PLATFORM_PATCH_DIR/$platform_patch" \
+            "$patch_dir/$platform_patch"
+    done
+}
+
+sync_platform_patches
+trap cleanup_lifecycle EXIT
+
 # A missing/empty statistics database is the broken partial-migration case seen
 # on device. Repair it before reader.lua opens it, without adding validation
 # latency to healthy launches. Full validation also runs from install-device.sh.
-if [ ! -s "$KOREADER_DIR/settings/statistics.sqlite3" ] && [ -x "$KOREADER_MIGRATOR" ]; then
+if [ ! -s "$KOREADER_DATA_DIR/settings/statistics.sqlite3" ] && [ -x "$KOREADER_MIGRATOR" ]; then
     if "$KOREADER_MIGRATOR"; then
         :
     else
@@ -146,6 +284,12 @@ select_library_dir() {
 # Passing a directory explicitly forces KOReader into its file manager. With
 # no argument reader.lua may restore lastfile (including a thumbnail) or a
 # broad parent directory instead of the books library.
+if [ "$#" -gt 0 ]; then
+    # The manager also carries this value in lifecycle Start. The late
+    # userpatch uses this exact byte string to avoid opening the same book a
+    # second time after reader.lua already consumed argv.
+    export REMAGIC_INITIAL_OPEN_PATH=$1
+fi
 if [ "$#" -eq 0 ]; then
     set -- "$(select_library_dir)"
 fi
@@ -155,9 +299,24 @@ child_pid=
 terminate_child() {
     signal=$1
     status=$2
+    # The manager sends TERM one second before it escalates to KILL. Stop
+    # handling signals recursively, give reader.lua half of that remaining
+    # budget, then kill and reap it ourselves. Otherwise the manager can only
+    # kill this wrapper PID and a wedged reader.lua would survive as an orphan.
+    trap - HUP INT TERM
     if [ -n "$child_pid" ]; then
         kill -"$signal" "$child_pid" 2>/dev/null || true
+
+        (
+            sleep 0.5
+            kill -KILL "$child_pid" 2>/dev/null || true
+        ) &
+        child_killer_pid=$!
+
         wait "$child_pid" 2>/dev/null || true
+        kill -TERM "$child_killer_pid" 2>/dev/null || true
+        wait "$child_killer_pid" 2>/dev/null || true
+        child_pid=
     fi
     exit "$status"
 }
@@ -174,6 +333,7 @@ cd "$KOREADER_DIR" || exit 1
 # itself are never shimmed.
 while :; do
     LD_PRELOAD="$QTFB_SHIM" \
+    QTFB_SHIM_ONESHOT=1 \
     QTFB_SHIM_MODEL=false \
     QTFB_SHIM_INPUT=1 \
     QTFB_SHIM_INPUT_MODE=NATIVE \

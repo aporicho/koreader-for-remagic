@@ -48,6 +48,28 @@ run_migration() {
         "$MIGRATOR"
 }
 
+# remagic-runner opens the validated migrator first and executes that exact
+# inode through /proc/self/fd/N. The resulting $0 is the descriptor path, so
+# sibling tools must come from the explicit libexec contract rather than $0.
+case_fd=$TMPDIR_TEST/case-fd-exec
+active=$case_fd/active
+make_db "$active/settings/statistics.sqlite3" 2 6
+fd_hash_before=$(sha256sum "$active/settings/statistics.sqlite3" | awk '{ print $1 }')
+(
+    exec 8<"$MIGRATOR"
+    KOREADER_DIR=$active \
+    KOREADER_DATA_DIR=$active \
+    KOREADER_LEGACY_DATA_DIRS=$case_fd/missing-source \
+    KOREADER_BACKUP_ROOT=$case_fd/backups \
+    KOREADER_LIBEXEC_DIR=$ROOT/scripts \
+    KOREADER_DB_INSPECTOR= \
+        /proc/self/fd/8
+)
+fd_hash_after=$(sha256sum "$active/settings/statistics.sqlite3" | awk '{ print $1 }')
+[ "$fd_hash_before" = "$fd_hash_after" ] || fail "fd-executed migration changed a valid database"
+[ "$(inspect_counts "$active/settings/statistics.sqlite3")" = 2:6 ] || \
+    fail "fd-executed migration did not use the explicit libexec inspector"
+
 # Empty active DB: choose the source with the richer page history, isolate the
 # empty file, and merge missing settings without overwriting current files.
 case1=$TMPDIR_TEST/case1
@@ -59,12 +81,19 @@ mkdir -p "$active/settings" "$rich/settings" "$poor/settings"
 printf 'current history\n' >"$active/history.lua"
 printf 'legacy history\n' >"$rich/history.lua"
 printf 'return { legacy = true }\n' >"$rich/defaults.custom.lua"
+mkdir -p "$rich/clipboard" "$rich/data/dict" "$rich/data/tessdata"
+printf 'saved clipboard\n' >"$rich/clipboard/note.txt"
+printf 'dictionary payload\n' >"$rich/data/dict/custom.dict"
+printf 'ocr payload\n' >"$rich/data/tessdata/custom.traineddata"
 make_db "$rich/settings/statistics.sqlite3" 7 26
 make_db "$poor/settings/statistics.sqlite3" 1 1
 run_migration "$active" "$poor:$rich"
 [ "$(inspect_counts "$active/settings/statistics.sqlite3")" = 7:26 ] || fail "did not select richer recovery database"
 grep -q '^current history$' "$active/history.lua" || fail "existing user history was overwritten"
 grep -q 'legacy = true' "$active/defaults.custom.lua" || fail "missing user setting was not copied"
+grep -q 'saved clipboard' "$active/clipboard/note.txt" || fail "clipboard data was not migrated"
+grep -q 'dictionary payload' "$active/data/dict/custom.dict" || fail "custom dictionary was not migrated"
+grep -q 'ocr payload' "$active/data/tessdata/custom.traineddata" || fail "OCR language data was not migrated"
 find "$active/settings" -name 'statistics.sqlite3.invalid.*' -type f | grep -q . || fail "empty target was not isolated"
 find "$TMPDIR_TEST/backups" -path '*/data/settings/statistics.sqlite3' -type f | grep -q . || fail "pre-repair backup was not created"
 
@@ -206,6 +235,90 @@ hash_after=$(sha256sum "$active/settings/statistics.sqlite3" | awk '{ print $1 }
 [ "$hash_before" = "$hash_after" ] || fail "unknown future layout was replaced by legacy data"
 [ "$(sqlite3 "$active/settings/statistics.sqlite3" 'SELECT position FROM future_reading_events;')" = 42 ] || \
     fail "future-schema content was not preserved"
+
+# Legacy data is input, not trusted filesystem structure. A symlink at any
+# depth must never be reproduced in the managed writable tree.
+case_symlink_source=$TMPDIR_TEST/case-symlink-source
+active=$case_symlink_source/active
+source=$case_symlink_source/source
+outside=$case_symlink_source/outside
+make_db "$active/settings/statistics.sqlite3" 1 1
+mkdir -p "$source/clipboard" "$outside"
+printf 'outside payload\n' >"$outside/payload"
+mkdir -p "$outside/deep/dict"
+printf 'outside dictionary\n' >"$outside/deep/dict/escaped.dict"
+ln -s "$outside/payload" "$source/defaults.custom.lua"
+ln -s "$outside" "$source/clipboard/outside-dir"
+ln -s "$outside/deep" "$source/data"
+run_migration "$active" "$source"
+[ ! -e "$active/defaults.custom.lua" ] && [ ! -L "$active/defaults.custom.lua" ] || \
+    fail "legacy file symlink became active user data"
+[ ! -e "$active/clipboard/outside-dir" ] && [ ! -L "$active/clipboard/outside-dir" ] || \
+    fail "nested legacy directory symlink became active user data"
+[ ! -e "$active/data/dict/escaped.dict" ] || \
+    fail "legacy symlink in a selected path's parent was traversed"
+if find "$active" -type l -print -quit | grep -q .; then
+    fail "migration introduced a symlink into managed user data"
+fi
+
+# Every existing component of a managed write path is checked before mkdir,
+# redirection, rename, or copy. In particular, neither an intermediate data
+# symlink nor a settings-directory symlink may redirect migration writes.
+case_symlink_target=$TMPDIR_TEST/case-symlink-target
+outside=$case_symlink_target/outside
+source=$case_symlink_target/source
+mkdir -p "$outside/settings" "$source/settings"
+printf 'outside sentinel\n' >"$outside/settings/sentinel"
+make_db "$source/settings/statistics.sqlite3" 3 7
+ln -s "$outside" "$case_symlink_target/data-link"
+outside_before=$(find "$outside" -type f -exec sha256sum {} \; | LC_ALL=C sort)
+set +e
+KOREADER_DIR=$source \
+KOREADER_DATA_DIR=$case_symlink_target/data-link/data \
+KOREADER_LEGACY_DATA_DIRS=$source \
+KOREADER_BACKUP_ROOT=$case_symlink_target/backups \
+KOREADER_DB_INSPECTOR=$INSPECTOR \
+    "$MIGRATOR" >"$case_symlink_target/intermediate.log" 2>&1
+intermediate_status=$?
+set -e
+[ "$intermediate_status" -ne 0 ] || fail "intermediate data-root symlink was accepted"
+[ "$outside_before" = "$(find "$outside" -type f -exec sha256sum {} \; | LC_ALL=C sort)" ] || \
+    fail "intermediate data-root symlink redirected a migration write"
+
+active=$case_symlink_target/active
+outside_settings=$case_symlink_target/outside-settings
+mkdir -p "$active" "$outside_settings"
+printf 'outside database\n' >"$outside_settings/statistics.sqlite3"
+printf 'outside sentinel\n' >"$outside_settings/sentinel"
+ln -s "$outside_settings" "$active/settings"
+outside_before=$(find "$outside_settings" -type f -exec sha256sum {} \; | LC_ALL=C sort)
+set +e
+run_migration "$active" "$source" >"$case_symlink_target/settings.log" 2>&1
+settings_status=$?
+set -e
+[ "$settings_status" -ne 0 ] || fail "symlinked active settings directory was accepted"
+[ "$outside_before" = "$(find "$outside_settings" -type f -exec sha256sum {} \; | LC_ALL=C sort)" ] || \
+    fail "symlinked active settings directory redirected a migration write"
+
+backup_outside=$case_symlink_target/backup-outside
+mkdir -p "$backup_outside"
+printf 'backup sentinel\n' >"$backup_outside/sentinel"
+ln -s "$backup_outside" "$case_symlink_target/backup-link"
+safe_active=$case_symlink_target/safe-active
+make_db "$safe_active/settings/statistics.sqlite3" 1 1
+backup_before=$(find "$backup_outside" -type f -exec sha256sum {} \; | LC_ALL=C sort)
+set +e
+KOREADER_DIR=$source \
+KOREADER_DATA_DIR=$safe_active \
+KOREADER_LEGACY_DATA_DIRS=$source \
+KOREADER_BACKUP_ROOT=$case_symlink_target/backup-link/backups \
+KOREADER_DB_INSPECTOR=$INSPECTOR \
+    "$MIGRATOR" >"$case_symlink_target/backup.log" 2>&1
+backup_status=$?
+set -e
+[ "$backup_status" -ne 0 ] || fail "intermediate backup-root symlink was accepted"
+[ "$backup_before" = "$(find "$backup_outside" -type f -exec sha256sum {} \; | LC_ALL=C sort)" ] || \
+    fail "intermediate backup-root symlink redirected a migration write"
 
 # A live PID owns the migration lock and must never be broken by a concurrent
 # installer. After SIGKILL, the kernel guard is released and the dead PID lock

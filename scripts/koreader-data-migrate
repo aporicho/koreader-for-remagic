@@ -2,19 +2,156 @@
 set -eu
 
 KOREADER_DIR=${KOREADER_DIR:-/home/root/apps/koreader}
-KOREADER_DATA_DIR=${KOREADER_DATA_DIR:-$KOREADER_DIR}
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-DB_INSPECTOR=${KOREADER_DB_INSPECTOR:-$SCRIPT_DIR/koreader-db-inspect}
-LEGACY_DATA_DIRS=${KOREADER_LEGACY_DATA_DIRS:-/home/root/.paperweight/services/koreader/koreader:/home/root/.config/koreader}
+KOREADER_DATA_DIR=${KOREADER_DATA_DIR:-${KO_HOME:-/home/root/.local/share/remagic-koreader/data}}
+# The Manager executes a validated migrator through /proc/self/fd/N so the
+# opened inode cannot be swapped after validation. In that mode $0 names the
+# descriptor, not this installed directory; never derive sibling helpers from
+# it. Production supplies the same explicit root in the application manifest.
+KOREADER_LIBEXEC_DIR=${KOREADER_LIBEXEC_DIR:-/home/root/apps/remagic-koreader/libexec}
+DB_INSPECTOR=${KOREADER_DB_INSPECTOR:-$KOREADER_LIBEXEC_DIR/koreader-db-inspect}
+LEGACY_DATA_DIRS=${KOREADER_LEGACY_DATA_DIRS:-$KOREADER_DIR:/home/root/.paperweight/services/koreader/koreader:/home/root/.config/koreader}
 BACKUP_ROOT=${KOREADER_BACKUP_ROOT:-/home/root/.local/state/remagic-koreader/backups}
 TARGET_SETTINGS=$KOREADER_DATA_DIR/settings
 TARGET_DB=$TARGET_SETTINGS/statistics.sqlite3
-USER_DATA_PATHS="settings.reader.lua settings.reader.lua.old history.lua defaults.custom.lua settings docsettings hashdocsettings history screenshots styletweaks sync"
+USER_DATA_PATHS="settings.reader.lua settings.reader.lua.old history.lua defaults.custom.lua settings docsettings hashdocsettings history screenshots styletweaks sync clipboard data/dict data/tessdata"
 FLOCK=${KOREADER_FLOCK:-/usr/bin/flock}
 
 [ -x "$DB_INSPECTOR" ] || { echo "KOReader database inspector missing: $DB_INSPECTOR" >&2; exit 1; }
 [ -x "$FLOCK" ] || { echo "KOReader migration lock helper missing: $FLOCK" >&2; exit 1; }
-mkdir -p "$TARGET_SETTINGS" "$BACKUP_ROOT"
+
+canonical_absolute_path() {
+    local candidate relative
+    candidate=$1
+    case "$candidate" in /*) ;; *) return 1 ;; esac
+    relative=${candidate#/}
+    case "/$relative/" in */../*|*/./*|*//*) return 1 ;; esac
+}
+
+# Check every existing component without resolving through a symlink. Missing
+# trailing components are permitted before mkdir and checked again afterward.
+assert_safe_directory_path() {
+    local directory remaining current component
+    directory=$1
+    canonical_absolute_path "$directory" || {
+        echo "Unsafe non-canonical KOReader directory path: $directory" >&2
+        return 1
+    }
+    remaining=${directory#/}
+    current=
+    while [ -n "$remaining" ]; do
+        case "$remaining" in
+            */*) component=${remaining%%/*}; remaining=${remaining#*/} ;;
+            *) component=$remaining; remaining= ;;
+        esac
+        current=$current/$component
+        [ ! -L "$current" ] || {
+            echo "Unsafe KOReader directory symlink: $current" >&2
+            return 1
+        }
+        if [ -e "$current" ] && [ ! -d "$current" ]; then
+            echo "Unsafe non-directory KOReader path component: $current" >&2
+            return 1
+        fi
+    done
+}
+
+assert_safe_storage_tree() {
+    local storage unsafe
+    storage=$1
+    assert_safe_directory_path "$storage" || return 1
+    [ -e "$storage" ] || [ -L "$storage" ] || return 0
+    [ -d "$storage" ] && [ ! -L "$storage" ] || {
+        echo "Unsafe KOReader storage root: $storage" >&2
+        return 1
+    }
+    unsafe=$(find "$storage" ! -type f ! -type d -print -quit 2>/dev/null) || {
+        echo "Unable to inspect KOReader storage tree: $storage" >&2
+        return 1
+    }
+    [ -z "$unsafe" ] || {
+        echo "Unsafe KOReader storage object: $unsafe" >&2
+        return 1
+    }
+}
+
+assert_managed_path() {
+    local root target parent root_real parent_real
+    root=$1
+    target=$2
+    canonical_absolute_path "$root" && canonical_absolute_path "$target" || return 1
+    case "$target" in "$root"|"$root"/*) ;; *)
+        echo "KOReader write target escapes managed root: $target" >&2
+        return 1
+        ;;
+    esac
+    if [ "$target" = "$root" ]; then
+        parent=$root
+    else
+        parent=${target%/*}
+    fi
+    assert_safe_directory_path "$parent" || return 1
+    if [ -d "$root" ] && [ -d "$parent" ]; then
+        root_real=$(CDPATH= cd -- "$root" && pwd -P) || return 1
+        parent_real=$(CDPATH= cd -- "$parent" && pwd -P) || return 1
+        case "$parent_real" in "$root_real"|"$root_real"/*) ;; *)
+            echo "KOReader write target resolves outside managed root: $target" >&2
+            return 1
+            ;;
+        esac
+    fi
+    [ ! -L "$target" ] || {
+        echo "KOReader write target is a symlink: $target" >&2
+        return 1
+    }
+    if [ -e "$target" ] && [ ! -f "$target" ] && [ ! -d "$target" ]; then
+        echo "KOReader write target is a special file: $target" >&2
+        return 1
+    fi
+}
+
+safe_mkdir() {
+    local root directory
+    root=$1
+    directory=$2
+    assert_managed_path "$root" "$directory" || return 1
+    mkdir -p "$directory"
+    assert_safe_directory_path "$directory"
+    assert_managed_path "$root" "$directory"
+}
+
+assert_safe_directory_path "$KOREADER_DATA_DIR"
+assert_safe_directory_path "$BACKUP_ROOT"
+case "$KOREADER_DATA_DIR/" in "$BACKUP_ROOT/"*)
+    echo "KOReader data root must not be inside its backup root" >&2
+    exit 1
+    ;;
+esac
+case "$BACKUP_ROOT/" in "$KOREADER_DATA_DIR/"*)
+    echo "KOReader backup root must not be inside its data root" >&2
+    exit 1
+    ;;
+esac
+mkdir -p "$KOREADER_DATA_DIR" "$BACKUP_ROOT"
+assert_safe_storage_tree "$KOREADER_DATA_DIR"
+assert_safe_storage_tree "$BACKUP_ROOT"
+safe_mkdir "$KOREADER_DATA_DIR" "$TARGET_SETTINGS"
+
+data_root_real=$(CDPATH= cd -- "$KOREADER_DATA_DIR" && pwd -P)
+backup_root_real=$(CDPATH= cd -- "$BACKUP_ROOT" && pwd -P)
+[ "$data_root_real" != "$backup_root_real" ] || {
+    echo "KOReader data and backup roots must be distinct" >&2
+    exit 1
+}
+case "$data_root_real/" in "$backup_root_real/"*)
+    echo "KOReader data root must not be inside its backup root" >&2
+    exit 1
+    ;;
+esac
+case "$backup_root_real/" in "$data_root_real/"*)
+    echo "KOReader backup root must not be inside its data root" >&2
+    exit 1
+    ;;
+esac
 
 LOCK_DIR=$KOREADER_DATA_DIR/.remagic-data-migrate.lock
 LOCK_GUARD=$KOREADER_DATA_DIR/.remagic-data-migrate.guard
@@ -25,6 +162,7 @@ LOCK_HELD=0
 # PID-aware directory remains visible for the entire migration. Kernel flock
 # state disappears after SIGKILL or power loss, so two recovery attempts can
 # never concurrently remove or replace the same stale directory.
+assert_managed_path "$KOREADER_DATA_DIR" "$LOCK_GUARD"
 exec 9>"$LOCK_GUARD"
 if ! "$FLOCK" -x -n 9; then
     echo "KOReader data migration lock is being inspected by another process" >&2
@@ -53,11 +191,15 @@ if [ -d "$LOCK_DIR" ]; then
     fi
 
     echo "Removing stale KOReader data migration lock (pid=${lock_pid:-missing})" >&2
+    assert_managed_path "$KOREADER_DATA_DIR" "$LOCK_DIR"
     rm -rf "$LOCK_DIR"
 fi
 
+assert_managed_path "$KOREADER_DATA_DIR" "$LOCK_DIR"
 mkdir "$LOCK_DIR"
 LOCK_HELD=1
+assert_managed_path "$KOREADER_DATA_DIR" "$LOCK_DIR/owner"
+assert_managed_path "$KOREADER_DATA_DIR" "$LOCK_DIR/pid"
 printf '%s\n' "$LOCK_OWNER" >"$LOCK_DIR/owner"
 printf '%s\n' "$$" >"$LOCK_DIR/pid"
 "$FLOCK" -u 9
@@ -113,13 +255,21 @@ path_exists() {
 }
 
 backup_active_data() {
-    local name source_path
+    local name source_path backup_target
     [ "$backup_created" -eq 0 ] || return 0
-    mkdir -p "$run_backup/data"
+    [ ! -e "$run_backup" ] && [ ! -L "$run_backup" ] || {
+        echo "KOReader migration backup path already exists: $run_backup" >&2
+        return 1
+    }
+    safe_mkdir "$BACKUP_ROOT" "$run_backup/data"
     for name in $USER_DATA_PATHS; do
         source_path=$KOREADER_DATA_DIR/$name
         path_exists "$source_path" || continue
-        cp -a "$source_path" "$run_backup/data/$name"
+        assert_managed_path "$KOREADER_DATA_DIR" "$source_path"
+        backup_target=$run_backup/data/$name
+        safe_mkdir "$BACKUP_ROOT" "${backup_target%/*}"
+        assert_managed_path "$BACKUP_ROOT" "$backup_target"
+        cp -a "$source_path" "$backup_target"
     done
     backup_created=1
     echo "KOReader user data backup: $run_backup" >&2
@@ -137,14 +287,19 @@ copy_missing_path() {
             ;;
     esac
 
-    if [ -d "$source_path" ] && [ ! -L "$source_path" ]; then
+    if [ -L "$source_path" ]; then
+        echo "Skipping legacy KOReader symlink: $source_path" >&2
+        return 0
+    fi
+
+    if [ -d "$source_path" ]; then
         if path_exists "$target_path" && { [ ! -d "$target_path" ] || [ -L "$target_path" ]; }; then
             echo "Skipping KOReader user-data directory blocked by existing path: $target_path" >&2
             return 0
         fi
         if ! path_exists "$target_path"; then
             backup_active_data
-            mkdir -p "$target_path"
+            safe_mkdir "$KOREADER_DATA_DIR" "$target_path"
         fi
         for source_child in "$source_path"/* "$source_path"/.[!.]* "$source_path"/..?*; do
             path_exists "$source_child" || continue
@@ -154,22 +309,38 @@ copy_missing_path() {
         return 0
     fi
 
+    if [ ! -f "$source_path" ]; then
+        echo "Skipping legacy KOReader special object: $source_path" >&2
+        return 0
+    fi
+
     if ! path_exists "$target_path"; then
         backup_active_data
-        mkdir -p "${target_path%/*}"
-        cp -a "$source_path" "$target_path"
+        safe_mkdir "$KOREADER_DATA_DIR" "${target_path%/*}"
+        assert_managed_path "$KOREADER_DATA_DIR" "$target_path"
+        cp -p "$source_path" "$target_path"
     fi
 }
 
 copy_missing_user_data() {
     local source_dir name source_path
     source_dir=$1
-    [ -d "$source_dir" ] || return 0
+    if ! assert_safe_directory_path "$source_dir" 2>/dev/null || \
+       [ ! -d "$source_dir" ] || [ -L "$source_dir" ]; then
+        if path_exists "$source_dir"; then
+            echo "Skipping unsafe legacy KOReader root: $source_dir" >&2
+        fi
+        return 0
+    fi
     [ "$source_dir" != "$KOREADER_DATA_DIR" ] || return 0
 
     for name in $USER_DATA_PATHS; do
         source_path=$source_dir/$name
         path_exists "$source_path" || continue
+        if ! assert_safe_directory_path "${source_path%/*}" 2>/dev/null; then
+            echo "Skipping legacy KOReader path below a symlink: $source_path" >&2
+            continue
+        fi
         copy_missing_path "$source_path" "$KOREADER_DATA_DIR/$name" "$name"
     done
 }
@@ -183,11 +354,16 @@ best_mtime=0
 consider_candidate() {
     local candidate metadata old_ifs schema books pages mtime
     candidate=$1
-    [ -f "$candidate" ] || return 0
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] || return 0
+    assert_safe_directory_path "${candidate%/*}" 2>/dev/null || return 0
     [ "$candidate" != "$TARGET_DB" ] || return 0
 
     # A live WAL cannot be copied safely as a standalone file. Legacy sources
     # are expected to be inactive; skip rather than risk losing committed rows.
+    if [ -L "$candidate-wal" ]; then
+        echo "Skipping KOReader database with a symlinked WAL: $candidate" >&2
+        return 0
+    fi
     if [ -s "$candidate-wal" ]; then
         echo "Skipping KOReader database with a live WAL: $candidate" >&2
         return 0
@@ -285,17 +461,28 @@ fi
 if [ "$replace_reason" = recovered ]; then
     backup_active_data
     tmp_db=$TARGET_DB.remagic-new.$$
+    assert_managed_path "$KOREADER_DATA_DIR" "$tmp_db"
+    [ ! -e "$tmp_db" ] && [ ! -L "$tmp_db" ] || {
+        echo "KOReader temporary database path already exists: $tmp_db" >&2
+        exit 1
+    }
     cp -p "$best_db" "$tmp_db"
     inspect_db "$tmp_db" >/dev/null || { echo "Copied KOReader database failed validation" >&2; exit 1; }
 
     if [ -e "$TARGET_DB" ]; then
         isolated=$TARGET_DB.invalid.$stamp
         [ ! -e "$isolated" ] || isolated=$isolated.$$
+        assert_managed_path "$KOREADER_DATA_DIR" "$isolated"
         mv "$TARGET_DB" "$isolated"
         for suffix in -wal -shm; do
-            [ ! -e "$TARGET_DB$suffix" ] || mv "$TARGET_DB$suffix" "$isolated$suffix"
+            [ ! -e "$TARGET_DB$suffix" ] || {
+                assert_managed_path "$KOREADER_DATA_DIR" "$TARGET_DB$suffix"
+                assert_managed_path "$KOREADER_DATA_DIR" "$isolated$suffix"
+                mv "$TARGET_DB$suffix" "$isolated$suffix"
+            }
         done
     fi
+    assert_managed_path "$KOREADER_DATA_DIR" "$TARGET_DB"
     mv "$tmp_db" "$TARGET_DB"
     tmp_db=
     chmod 0600 "$TARGET_DB"
@@ -304,9 +491,14 @@ elif [ "$replace_reason" = isolate-only ]; then
     backup_active_data
     isolated=$TARGET_DB.invalid.$stamp
     [ ! -e "$isolated" ] || isolated=$isolated.$$
+    assert_managed_path "$KOREADER_DATA_DIR" "$isolated"
     mv "$TARGET_DB" "$isolated"
     for suffix in -wal -shm; do
-        [ ! -e "$TARGET_DB$suffix" ] || mv "$TARGET_DB$suffix" "$isolated$suffix"
+        [ ! -e "$TARGET_DB$suffix" ] || {
+            assert_managed_path "$KOREADER_DATA_DIR" "$TARGET_DB$suffix"
+            assert_managed_path "$KOREADER_DATA_DIR" "$isolated$suffix"
+            mv "$TARGET_DB$suffix" "$isolated$suffix"
+        }
     done
     echo "Invalid KOReader statistics database isolated; KOReader will create a clean database" >&2
 fi

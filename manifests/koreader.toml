@@ -1,12 +1,18 @@
-schema = 1
+schema = 2
 id = "koreader"
 name = "KOReader"
 description = "Paper Pro Move 独立电子书阅读器"
 version = "2026.03"
 exec = "/home/root/apps/remagic-koreader/bin/koreader-remagic"
-working_dir = "/home/root/apps/koreader"
+working_dir = "/home/root/apps/remagic-koreader/program"
 display = "qtfb"
-park_strategy = "restart"
+resident = true
+capabilities = [
+  "display:qtfb-v1",
+  "input:touch-v1",
+  "lifecycle:v2",
+  "network:outbound-v1",
+]
 supports_open_path = true
 allowed_open_roots = [
   "/home/root/.local/share/remagic-koreader/library",
@@ -15,5 +21,55 @@ allowed_open_roots = [
   "/home/root/.local/share/remarkable/xochitl",
 ]
 
+[readiness]
+mode = "first_frame"
+timeout_ms = 20000
+
+[shutdown]
+graceful_timeout_ms = 3500
+term_timeout_ms = 4500
+kill_timeout_ms = 5500
+
+[data_schema]
+version = 1
+migrator = "/home/root/apps/remagic-koreader/libexec/koreader-data-migrate"
+backup_paths = [
+  "/home/root/.local/share/remagic-koreader/data",
+]
+backup_timeout_ms = 120000
+migration_timeout_ms = 120000
+
+[runtime]
+profile = "qtfb_compat"
+required_libraries = []
+
+[runtime.directories]
+home = "/home/root"
+config_home = "/home/root/.config/remagic-koreader"
+data_home = "/home/root/.local/share/remagic-koreader"
+state_home = "/home/root/.local/state/remagic-koreader"
+cache_home = "/home/root/.cache/remagic-koreader"
+runtime_dir = "/run/remagic/apps/koreader"
+
+[runtime.locale]
+lang = "C.UTF-8"
+
+[runtime.timezone]
+name = "Asia/Shanghai"
+
+[runtime.fonts]
+directories = ["/home/root/apps/remagic-koreader/program/fonts/remagic"]
+
+[runtime.certificates]
+required = false
+
+[runtime.network]
+mode = "outbound"
+
 [environment]
-HOME = "/home/root"
+KOREADER_DIR = "/home/root/apps/remagic-koreader/program"
+KOREADER_LIBEXEC_DIR = "/home/root/apps/remagic-koreader/libexec"
+KO_HOME = "/home/root/.local/share/remagic-koreader/data"
+KOREADER_DATA_DIR = "/home/root/.local/share/remagic-koreader/data"
+KOREADER_SETTINGS = "/home/root/.local/share/remagic-koreader/data/settings.reader.lua"
+KOREADER_BACKUP_ROOT = "/home/root/.local/state/remagic-koreader/backups"

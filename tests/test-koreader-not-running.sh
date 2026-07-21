@@ -37,8 +37,8 @@ status=$?
 set -e
 [ "$status" -eq 1 ] || fail "running adapter wrapper was not detected"
 
-check_line=$(grep -n 'scripts/koreader-not-running' "$INSTALLER" | sed -n '1s/:.*//p')
-mutation_line=$(grep -n '^mkdir -p /home/root/apps/remagic-koreader' "$INSTALLER" | sed -n '1s/:.*//p')
+check_line=$(grep -n '^run_not_running_check$' "$INSTALLER" | sed -n '1s/:.*//p')
+mutation_line=$(grep -n '^acquire_install_lock$' "$INSTALLER" | sed -n '1s/:.*//p')
 [ -n "$check_line" ] && [ -n "$mutation_line" ] || fail "could not verify installer safety order"
 [ "$check_line" -lt "$mutation_line" ] || fail "installer mutates files before checking the running process"
 
