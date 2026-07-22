@@ -1,17 +1,21 @@
 # KOReader for ReMagic
 
-面向 reMarkable Paper Pro Move 的 KOReader QTFB 适配层。它让官方 KOReader
+面向 reMarkable Paper Pro 和 Paper Pro Move 的 KOReader QTFB 适配层。它让官方 KOReader
 作为普通 ReMagic 应用运行，不依赖镇纸、Paperweight、xochitl、einkface 或
 `/dev/fb0`。
+
+“KOReader for ReMagic”只表示本适配项目；安装后的商店、任务管理器和应用标题统一
+显示为“KOReader”，内部包名不会出现在用户界面。
 
 ## 不修改官方 KOReader
 
 程序、适配器和数据分为三个边界：
 
 ```text
-/home/root/apps/koreader-for-remagic/
-├── vendor/releases/<official-release>/koreader/  # 官方本体，只读
-└── adapter/releases/<content-hash>/               # ReMagic 适配器，只读
+/home/root/apps/koreader/releases/<content-id>/
+└── payload/
+    ├── vendor/releases/<official-release>/koreader/  # 官方本体，只读
+    └── adapter/releases/<content-hash>/               # ReMagic 适配器，只读
 
 /home/root/.local/share/koreader-for-remagic/data/     # 设置、进度、数据库
 /home/root/.local/state/koreader-for-remagic/          # 迁移备份
@@ -38,7 +42,17 @@ ReMagic 构建时校验官方压缩包和完整文件清单，并把 vendor 作�
 
 `manifests/koreader.toml` 是 schema v2 模板。Adapter 路径包含
 `__REMAGIC_ADAPTER_RELEASE__`，ReMagic 打包时必须替换为该 release 的内容哈希，
-不得在生产 manifest 中留下占位符或改用可变的 `current` 链接。
+包级 release 由内容 ID 寻址，运行 manifest 则统一经由
+`/home/root/apps/koreader/current` 原子链接进入当前只读 release。生产 manifest
+不得留下适配器占位符。
+该 manifest 声明 `paper_pro`/`paper_pro_move`、ReMagic API v2 和
+`keep_data` 卸载策略。`supported_os = []` 表示继承已安装 ReMagic 系统的
+OS 兼容门槛，应用不自行猜测或放宽系统版本。
+
+ReMagic 通过 `REMAGIC_DEVICE_PROFILE` 传入 schema v1 设备描述，并提供与
+实机匹配的 QTFB shim。wrapper 只请求中性 RGB565 surface，实际
+Ferrari/Chiappa 格式、尺寸和输入坐标均由 ReMagic/QTFB 运行时协商，
+适配层没有 Move 分辨率或 format 6 常量。
 
 KOReader 是驻留的 `qtfb_compat` 应用，后台策略为：
 
@@ -79,7 +93,8 @@ wrapper 只复现上游脚本安全的 `/tmp/koreader.sh` 同步步骤。返回�
 重新启动，其他返回码交回 ReMagic。
 
 每次启动会从 reMarkable `.metadata` 原子生成友好书库视图：优先链接 EPUB，其次
-PDF，不修改、移动或删除 xochitl 文件。无参数时进入友好书库；`read 书名` 可以
+PDF，不修改、移动或删除 xochitl 文件。无参数首次启动进入
+`/home/root/books`；之后只恢复该书库或生成视图内的有效目录。`read 书名` 可以
 通过 `open_path` 在同一个驻留 PID 中开书。
 
 ## 字体
@@ -97,7 +112,26 @@ scripts/stage-custom-fonts.sh <adapter-release>/share/fonts
 
 ## 独立安装与检查
 
-推荐由 ReMagic bundle 部署。独立安装器只适合已有固定 vendor 的环境：
+正式交付由 ReMagic Store 安装，不再随 ReMagic 系统 bundle 捆绑。发布时使用：
+
+```sh
+scripts/build-store-package.sh /path/to/koreader-remarkable-aarch64-v2026.03.zip dist/koreader-for-remagic.tar.gz
+```
+
+构建器校验固定官方归档，原样放入内容寻址的 vendor release，再生成
+内容寻址 adapter、最终 manifest、`bundle.json` 和完整 SHA-256 清单。
+Store 在应用已停止后验签、暂存并原子发布 payload；应用包不写
+ReMagic 系统目录。
+
+`bundle.json` 包含 `app_id`、`version`、`content_id`、`manifest_path`、
+`payload_sha256` 和逐文件的 path/mode/size/SHA-256。`payload_sha256` 是对按
+UTF-8 路径排序的 `path\0mode\0size\0sha256\n` 记录连续取 SHA-256。
+`content_id` 则对 `remagic-bundle-content-v1\0`、
+`app_id\0package\0version\0` 以及除 `bundle.json` 外全部文件的同格式
+记录连续取 SHA-256，与 MagicPaper 使用完全相同的 Store bundle v1 算法。
+外层包签名属于 Catalog/Store，不由应用包自签。
+
+独立安装器仅用于已有固定 vendor 的开发/恢复环境：
 
 ```sh
 sudo ./scripts/install-device.sh
@@ -108,8 +142,8 @@ sudo ./scripts/install-device.sh
 `adapter/releases/standalone-<hash>`，并事务化迁移用户数据。安装进行中、KOReader
 仍在运行、vendor 不完整、symlink/特殊文件、数据库校验失败或断电恢复不一致都会
 明确拒绝；回滚不会覆盖阅读数据或永久迁移备份。这个备用安装器不发布 ReMagic
-manifest；`standalone-*` 需要手工接入兼容的 manifest。日常设备部署应使用 ReMagic
-bundle，它会生成 `adapter-*`、固定清单并一次完成接线。
+manifest；`standalone-*` 需要手工接入兼容的 manifest。日常设备部署应使用
+ReMagic Store payload。
 
 `scripts/check.sh` 覆盖 manifest、wrapper、字体边界、迁移、友好书库、安装事务、
 语义 ready、保存、前后台、陈旧 token、开书与关闭。真实 SOCK_SEQPACKET 用例需要

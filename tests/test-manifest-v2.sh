@@ -14,6 +14,13 @@ manifest = tomllib.loads(path.read_text(encoding="utf-8"))
 
 assert manifest["schema"] == 2
 assert manifest["id"] == "koreader"
+assert manifest["name"] == "KOReader"
+assert manifest["kind"] == "user"
+assert manifest["package"] == "koreader-for-remagic"
+assert manifest["supported_devices"] == ["paper_pro", "paper_pro_move"]
+assert manifest["supported_os"] == []
+assert manifest["required_remagic_api"] == 2
+assert manifest["uninstall_policy"] == "keep_data"
 assert manifest["resident"] is True
 assert manifest["display"] == "qtfb"
 assert manifest["capabilities"] == [
@@ -24,9 +31,8 @@ assert manifest["capabilities"] == [
 ]
 assert manifest["supports_open_path"] is True
 assert manifest["allowed_open_roots"] == [
-    "/home/root/.local/share/koreader-for-remagic/library",
     "/home/root/books",
-    "/home/root/koreader",
+    "/home/root/.local/share/koreader-for-remagic/library",
     "/home/root/.local/share/remarkable/xochitl",
 ]
 
@@ -54,18 +60,19 @@ assert runtime["directories"]["data_home"] == "/home/root/.local/share/koreader-
 assert runtime["directories"]["runtime_dir"] == "/run/remagic/apps/koreader"
 assert runtime["network"]["mode"] == "outbound"
 assert manifest["environment"] == {
-    "KOREADER_DIR": "/home/root/apps/koreader-for-remagic/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader",
-    "KOREADER_LIBEXEC_DIR": "/home/root/apps/koreader-for-remagic/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/libexec",
+    "KOREADER_DIR": "/home/root/apps/koreader/current/payload/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader",
+    "KOREADER_LIBEXEC_DIR": "/home/root/apps/koreader/current/payload/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/libexec",
     "KO_HOME": "/home/root/.local/share/koreader-for-remagic/data",
     "KOREADER_DATA_DIR": "/home/root/.local/share/koreader-for-remagic/data",
     "KOREADER_SETTINGS": "/home/root/.local/share/koreader-for-remagic/data/settings.reader.lua",
+    "KOREADER_BOOKS_DIR": "/home/root/books",
     "KOREADER_BACKUP_ROOT": "/home/root/.local/state/koreader-for-remagic/backups",
-    "KOREADER_LEGACY_DATA_DIRS": "/home/root/.local/share/remagic-koreader/data:/home/root/apps/koreader:/home/root/.paperweight/services/koreader/koreader:/home/root/.config/koreader",
+    "KOREADER_LEGACY_DATA_DIRS": "/home/root/.local/share/remagic-koreader/data:/home/root/.paperweight/services/koreader/koreader:/home/root/.config/koreader",
 }
-assert manifest["exec"] == "/home/root/apps/koreader-for-remagic/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/bin/koreader-for-remagic"
-assert manifest["working_dir"] == "/home/root/apps/koreader-for-remagic/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader"
+assert manifest["exec"] == "/home/root/apps/koreader/current/payload/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/bin/koreader-for-remagic"
+assert manifest["working_dir"] == "/home/root/apps/koreader/current/payload/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader"
 assert runtime["fonts"]["directories"] == [
-    "/home/root/apps/koreader-for-remagic/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/share/fonts",
+    "/home/root/apps/koreader/current/payload/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/share/fonts",
 ]
 
 adapter_placeholder = "__REMAGIC_ADAPTER_RELEASE__"
@@ -76,6 +83,16 @@ for field in (
     *runtime["fonts"]["directories"],
 ):
     assert adapter_placeholder in field, field
+
+for field in (
+    manifest["exec"],
+    manifest["working_dir"],
+    manifest["data_schema"]["migrator"],
+    manifest["environment"]["KOREADER_DIR"],
+    manifest["environment"]["KOREADER_LIBEXEC_DIR"],
+    *runtime["fonts"]["directories"],
+):
+    assert field.startswith("/home/root/apps/koreader/current/"), field
 
 for field in (manifest["exec"], manifest["working_dir"], *manifest["allowed_open_roots"]):
     assert pathlib.PurePosixPath(field).is_absolute(), field

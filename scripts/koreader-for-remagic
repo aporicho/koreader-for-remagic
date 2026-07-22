@@ -3,10 +3,11 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 ADAPTER_DIR=${REMAGIC_KOREADER_ADAPTER_DIR:-$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd -P)}
-KOREADER_DIR=${KOREADER_DIR:-/home/root/apps/koreader-for-remagic/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader}
+KOREADER_DIR=${KOREADER_DIR:-}
 QTFB_SHIM=${QTFB_SHIM:-/home/root/apps/remagic/shims/qtfb-shim.so}
 KOREADER_READER=${KOREADER_READER:-$KOREADER_DIR/reader.lua}
 KOREADER_DATA_DIR=${KOREADER_DATA_DIR:-${KO_HOME:-/home/root/.local/share/koreader-for-remagic/data}}
+KOREADER_BOOKS_DIR=${KOREADER_BOOKS_DIR:-/home/root/books}
 KOREADER_LIBRARY_DIR=${KOREADER_LIBRARY_DIR:-/home/root/.local/share/koreader-for-remagic/library}
 KOREADER_SETTINGS=${KOREADER_SETTINGS:-$KOREADER_DATA_DIR/settings.reader.lua}
 KOREADER_LIBEXEC_DIR=${KOREADER_LIBEXEC_DIR:-$ADAPTER_DIR/libexec}
@@ -30,6 +31,10 @@ if [ -n "${KO_HOME:-}" ] && [ "$KO_HOME" != "$KOREADER_DATA_DIR" ]; then
 fi
 KO_HOME=$KOREADER_DATA_DIR
 
+if [ -z "$KOREADER_DIR" ]; then
+    echo "KOREADER_DIR is required for a content-addressed Store release" >&2
+    exit 1
+fi
 if [ ! -d "$KOREADER_DIR" ]; then
     echo "KOReader directory missing: $KOREADER_DIR" >&2
     exit 1
@@ -84,6 +89,21 @@ case ${REMAGIC_APP_GENERATION:-} in
         exit 1
         ;;
 esac
+if [ -z "${REMAGIC_DEVICE_PROFILE:-}" ]; then
+    echo "REMAGIC_DEVICE_PROFILE schema v1 is required for managed KOReader" >&2
+    exit 1
+fi
+case "$KOREADER_BOOKS_DIR" in
+    /*) ;;
+    *)
+        echo "KOReader books directory must be absolute: $KOREADER_BOOKS_DIR" >&2
+        exit 1
+        ;;
+esac
+if [ ! -d "$KOREADER_BOOKS_DIR" ] || [ -L "$KOREADER_BOOKS_DIR" ]; then
+    echo "KOReader books directory missing or unsafe: $KOREADER_BOOKS_DIR" >&2
+    exit 1
+fi
 
 old_ifs=$IFS
 IFS=:
@@ -113,7 +133,7 @@ export REMAGIC_MANAGED="${REMAGIC_MANAGED:-1}"
 export REMAGIC_APP_ID="${REMAGIC_APP_ID:-koreader}"
 export REMAGIC_KOREADER_FLOCK="${REMAGIC_KOREADER_FLOCK:-$KOREADER_INSTALL_FLOCK}"
 export REMAGIC_KOREADER_LIBEXEC_DIR="$KOREADER_LIBEXEC_DIR"
-export REMAGIC_ALLOWED_OPEN_ROOTS="${REMAGIC_ALLOWED_OPEN_ROOTS:-${KOREADER_ALLOWED_OPEN_ROOTS:-/home/root/.local/share/koreader-for-remagic/library:/home/root/books:/home/root/koreader:/home/root/.local/share/remarkable/xochitl}}"
+export REMAGIC_ALLOWED_OPEN_ROOTS="${REMAGIC_ALLOWED_OPEN_ROOTS:-${KOREADER_ALLOWED_OPEN_ROOTS:-/home/root/books:/home/root/.local/share/koreader-for-remagic/library:/home/root/.local/share/remarkable/xochitl}}"
 # Bind lifecycle identity to the wrapper process known by Manager.
 export REMAGIC_APP_PID="$$"
 
@@ -301,11 +321,7 @@ if "$KOREADER_LIBRARY_SYNC"; then
     :
 else
     library_sync_status=$?
-    if [ ! -d "$KOREADER_LIBRARY_DIR" ]; then
-        echo "KOReader friendly library synchronization failed (status=$library_sync_status) and no previous view is available" >&2
-        exit "$library_sync_status"
-    fi
-    echo "KOReader friendly library synchronization failed (status=$library_sync_status); using the previous complete view" >&2
+    echo "KOReader friendly library synchronization failed (status=$library_sync_status); using $KOREADER_BOOKS_DIR" >&2
 fi
 
 select_library_dir() {
@@ -316,27 +332,26 @@ select_library_dir() {
             "$KOREADER_SETTINGS" | sed -n '$p')
     fi
 
-    # Only restore directories inside the generated friendly library. This
-    # prevents UUID files and .thumbnails from the xochitl store leaking into
-    # KOReader's file manager.
+    # Restore only directories inside the primary books tree or the generated
+    # friendly view. This prevents UUID files and .thumbnails from the xochitl
+    # store leaking into KOReader's file manager.
     if [ -n "$lastdir" ] && [ -d "$lastdir" ]; then
         case "$lastdir/" in
+            "$KOREADER_BOOKS_DIR/"|"$KOREADER_BOOKS_DIR/"*)
+                echo "KOReader: library_dir=$lastdir source=lastdir" >&2
+                printf '%s\n' "$lastdir"
+                return
+                ;;
             "$KOREADER_LIBRARY_DIR/"|"$KOREADER_LIBRARY_DIR/"*)
-                echo "koreader-for-remagic: library_dir=$lastdir source=lastdir" >&2
+                echo "KOReader: library_dir=$lastdir source=lastdir" >&2
                 printf '%s\n' "$lastdir"
                 return
                 ;;
         esac
     fi
 
-    if [ -d "$KOREADER_LIBRARY_DIR" ]; then
-        echo "koreader-for-remagic: library_dir=$KOREADER_LIBRARY_DIR source=fallback" >&2
-        printf '%s\n' "$KOREADER_LIBRARY_DIR"
-        return
-    fi
-
-    echo "KOReader friendly library is unavailable: $KOREADER_LIBRARY_DIR" >&2
-    return 1
+    echo "KOReader: library_dir=$KOREADER_BOOKS_DIR source=fallback" >&2
+    printf '%s\n' "$KOREADER_BOOKS_DIR"
 }
 
 # Passing a directory explicitly forces KOReader into its file manager. With
@@ -389,6 +404,8 @@ cd "$KOREADER_DIR" || exit 1
 # /dev/fb0 before starting KOReader, none of which belongs in the QTFB host.
 # Keep LD_PRELOAD on the reader process only so shell helpers and the manager
 # itself are never shimmed.
+# N_RGB565 is device-neutral: the ReMagic QTFB shim maps it to the Ferrari or
+# Chiappa wire format selected by the runtime profile.
 while :; do
     LD_PRELOAD="$QTFB_SHIM" \
     QTFB_SHIM_ONESHOT=1 \

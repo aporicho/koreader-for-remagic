@@ -8,7 +8,7 @@ set -eu
 # data; it never modifies the vendor tree.
 
 die() {
-    echo "koreader-for-remagic install: $*" >&2
+    echo "KOReader install: $*" >&2
     exit 1
 }
 
@@ -139,12 +139,12 @@ test_hook() {
     stage=$1
     [ "$TEST_MODE" -eq 1 ] || return 0
     if [ "${REMAGIC_INSTALL_TEST_CRASH_AT:-}" = "$stage" ]; then
-        echo "koreader-for-remagic install: simulated power loss at $stage" >&2
+        echo "KOReader install: simulated power loss at $stage" >&2
         trap - EXIT HUP INT TERM
         exit 97
     fi
     if [ "${REMAGIC_INSTALL_TEST_FAIL_AT:-}" = "$stage" ]; then
-        echo "koreader-for-remagic install: simulated failure at $stage" >&2
+        echo "KOReader install: simulated failure at $stage" >&2
         return 96
     fi
 }

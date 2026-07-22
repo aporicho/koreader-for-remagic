@@ -42,8 +42,11 @@ for assignment in \
 do
     assert_contains "$assignment" "$WRAPPER"
 done
+if grep -E '(^|[^0-9])(954|1696|1620|2160)([^0-9]|$)|FBFMT_RMPP|FBFMT_RMPPM' "$WRAPPER" >/dev/null; then
+    fail "wrapper contains device-specific geometry or QTFB format constants"
+fi
 
-assert_contains 'exec = "/home/root/apps/koreader-for-remagic/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/bin/koreader-for-remagic"' "$ADAPTER_MANIFEST"
+assert_contains 'exec = "/home/root/apps/koreader/current/payload/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/bin/koreader-for-remagic"' "$ADAPTER_MANIFEST"
 assert_contains 'schema = 2' "$ADAPTER_MANIFEST"
 assert_contains 'display = "qtfb"' "$ADAPTER_MANIFEST"
 assert_contains 'resident = true' "$ADAPTER_MANIFEST"
@@ -78,11 +81,17 @@ LIFECYCLE_CHANNEL=$TMPDIR_TEST/lifecycle.channel
 exec 7<>"$LIFECYCLE_CHANNEL"
 export REMAGIC_LIFECYCLE_FD=7
 export REMAGIC_APP_GENERATION=3719679425990660
+PAPER_PRO_PROFILE='{"schema":1,"product":"paper_pro","codename":"ferrari"}'
+PAPER_PRO_MOVE_PROFILE='{"schema":1,"product":"paper_pro_move","codename":"chiappa"}'
+export REMAGIC_DEVICE_PROFILE=$PAPER_PRO_PROFILE
 export KOREADER_LIBEXEC_DIR=$ROOT/scripts
 LIBRARY_DIR_TEST=$TMPDIR_TEST/library
+BOOKS_DIR_TEST=$TMPDIR_TEST/books
 LAST_DIR_TEST=$LIBRARY_DIR_TEST/分册
+BOOKS_LAST_DIR_TEST=$BOOKS_DIR_TEST/长篇
 OUTSIDE_DIR_TEST=$TMPDIR_TEST/outside
-mkdir -p "$LAST_DIR_TEST" "$OUTSIDE_DIR_TEST"
+mkdir -p "$LAST_DIR_TEST" "$BOOKS_LAST_DIR_TEST" "$OUTSIDE_DIR_TEST"
+export KOREADER_BOOKS_DIR=$BOOKS_DIR_TEST
 SETTINGS_TEST=$DATA_HOME_TEST/settings.reader.lua
 TRACE=$TMPDIR_TEST/trace
 STATE=$TMPDIR_TEST/state
@@ -125,6 +134,7 @@ printf 'run=%s oneshot=%s mode=%s model=%s input=%s full=%s grab=%s depth=%s arg
 printf 'libexec=%s fonts=%s managed=%s flock=%s\n' \
     "$REMAGIC_KOREADER_LIBEXEC_DIR" "$EXT_FONT_DIR" "$REMAGIC_MANAGED" \
     "$REMAGIC_KOREADER_FLOCK" >>"$TEST_TRACE"
+printf 'device_profile=%s\n' "$REMAGIC_DEVICE_PROFILE" >>"$TEST_TRACE"
 if [ -n "${TEST_CHILD_PID_FILE:-}" ]; then
     printf '%s\n' "$$" >"$TEST_CHILD_PID_FILE"
 fi
@@ -186,6 +196,21 @@ assert_contains 'KOReader platform patch target is unsafe' "$UNSAFE_PATCH_LOG"
 [ ! -e "$TRACE" ] || fail "reader.lua ran with an unsafe platform patch target"
 rmdir "$DATA_HOME_TEST/patches/10-remagic-environment.lua"
 
+# A managed launch must carry the platform-owned profile. The adapter does not
+# infer a device from geometry or silently fall back to Move constants.
+MISSING_PROFILE_LOG=$TMPDIR_TEST/missing-device-profile.log
+set +e
+REMAGIC_DEVICE_PROFILE= \
+TEST_STATE=$STATE TEST_TRACE=$TRACE \
+KOREADER_DIR=$KOREADER_DIR_TEST QTFB_SHIM=$HOST_PRELOAD \
+KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
+    "$WRAPPER" 2>"$MISSING_PROFILE_LOG"
+missing_profile_status=$?
+set -e
+[ "$missing_profile_status" -ne 0 ] || fail "launch without a ReMagic device profile was accepted"
+assert_contains 'REMAGIC_DEVICE_PROFILE schema v1 is required' "$MISSING_PROFILE_LOG"
+[ ! -e "$TRACE" ] || fail "reader.lua ran without a ReMagic device profile"
+
 TEST_STATE=$STATE TEST_TRACE=$TRACE TEST_RESTART_ONCE=1 \
 KOREADER_DIR=$KOREADER_DIR_TEST QTFB_SHIM=$HOST_PRELOAD \
 KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
@@ -201,6 +226,7 @@ assert_contains "libexec=$ROOT/scripts" "$TRACE"
 assert_contains "fonts=$FONT_ONE;$FONT_TWO" "$TRACE"
 assert_contains "managed=1" "$TRACE"
 assert_contains "flock=$KOREADER_INSTALL_FLOCK" "$TRACE"
+assert_contains "device_profile=$PAPER_PRO_PROFILE" "$TRACE"
 [ ! -e "$KOREADER_DIR_TEST/settings.reader.lua" ] || fail "isolated KO_HOME wrote settings into the program tree"
 for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
     cmp -s "$KOREADER_PLATFORM_PATCH_DIR/$platform_patch" \
@@ -212,7 +238,7 @@ for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagi
         || fail "isolated $platform_patch has unsafe permissions"
 done
 assert_contains "dict=$DATA_HOME_TEST/data/dict" "$TRACE"
-assert_contains "koreader-for-remagic: library_dir=$LAST_DIR_TEST source=lastdir" "$WRAPPER_LOG"
+assert_contains "KOReader: library_dir=$LAST_DIR_TEST source=lastdir" "$WRAPPER_LOG"
 [ "$(wc -l <"$LIBRARY_SYNC_TRACE")" -eq 1 ] || fail "friendly library was not synchronized once per wrapper launch"
 cmp -s "$STARTUP_SCRIPT" "$ACTIVE_STARTUP_SCRIPT" || fail "wrapper did not refresh the active startup script"
 [ "$(stat -c '%a' "$ACTIVE_STARTUP_SCRIPT")" = 755 ] || fail "active startup script is not executable"
@@ -243,6 +269,7 @@ return {
 }
 EOF
 rm -f "$STATE" "$TRACE" "$WRAPPER_LOG"
+export REMAGIC_DEVICE_PROFILE=$PAPER_PRO_MOVE_PROFILE
 STARTUP_SENTINEL=$TMPDIR_TEST/startup-sentinel
 printf '%s\n' 'must not be overwritten through a symlink' >"$STARTUP_SENTINEL"
 printf '%s\n' '#!/bin/sh' 'echo installed-startup-v2' >"$STARTUP_SCRIPT"
@@ -252,8 +279,9 @@ TEST_STATE=$STATE TEST_TRACE=$TRACE \
 KOREADER_DIR=$KOREADER_DIR_TEST QTFB_SHIM=$HOST_PRELOAD \
 KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
     "$WRAPPER" 2>"$WRAPPER_LOG"
-assert_contains "argc=1 arg1=$LIBRARY_DIR_TEST" "$TRACE"
-assert_contains "koreader-for-remagic: library_dir=$LIBRARY_DIR_TEST source=fallback" "$WRAPPER_LOG"
+assert_contains "argc=1 arg1=$BOOKS_DIR_TEST" "$TRACE"
+assert_contains "KOReader: library_dir=$BOOKS_DIR_TEST source=fallback" "$WRAPPER_LOG"
+assert_contains "device_profile=$PAPER_PRO_MOVE_PROFILE" "$TRACE"
 [ "$(wc -l <"$LIBRARY_SYNC_TRACE")" -eq 2 ] || fail "second wrapper launch did not synchronize the friendly library"
 cmp -s "$STARTUP_SCRIPT" "$ACTIVE_STARTUP_SCRIPT" || fail "second launch left a stale active startup script"
 [ ! -L "$ACTIVE_STARTUP_SCRIPT" ] || fail "startup synchronization left an attacker-controlled symlink"
