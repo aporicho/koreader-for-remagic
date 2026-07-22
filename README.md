@@ -30,7 +30,9 @@ KOReader 的 FileManager 或 ReaderUI 完成第一次真实重绘并报告 `read
 首选传输是平台继承的双向 `REMAGIC_LIFECYCLE_FD`；Lua userpatch 直接进行
 非阻塞读写，不产生轮询子进程。过渡平台也可提供 `REMAGIC_APP_BRIDGE`，其
 `emit` 子命令从 stdin 接收一行 envelope，`poll` 子命令向 stdout 返回零到多行
-命令。`koreader-lifecycle` 是唯一知道旧 `koreader-ready`/`koreader-exit`
+命令。桥接 helper 只在 KOReader 自带的低优先级子进程中运行；默认最多每秒
+poll 一次，失败重试同样限频，卡死 worker 会被取消，因此 helper I/O 不会阻塞
+阅读 UI。`koreader-lifecycle` 是唯一知道旧 `koreader-ready`/`koreader-exit`
 文件的组件；没有 v2 传输时才自动降级，因此旧 Manager 仍可工作。
 
 支持的命令为 `enter_background`、`enter_foreground`、`open_path`、`shutdown`
@@ -75,7 +77,8 @@ QTFB 环境固定使用上游 Paper Pro Move 推荐值：`N_RGB565`、原生输�
 中的数据会幂等迁移，保持现有阅读记录兼容；故障注入验收则使用另一份临时数据根。
 KOReader 会从当前数据目录的 `patches/` 加载 userpatch，因此适配器把自己
 `share/patches` 中的只读平台补丁在启动前原子同步到当前 `KO_HOME`：早期补丁
-把 `version.log` 重定向到 DataStorage，后期补丁提供生命周期协议；字典目录也
+把 `version.log` 重定向到 DataStorage，后期补丁提供生命周期编排；协议编码、
+异步 helper 与安全开书分别由适配器 `libexec` 中的小型 Lua 模块实现。字典目录也
 默认落在当前数据根。隔离验收因此仍能报告真实 `ready`/后台/关闭事件，同时
 不会借用或修改正式程序目录中的补丁、版本日志、字典或阅读数据。
 

@@ -13,6 +13,9 @@ sh -n scripts/koreader-lifecycle
 lua -e 'assert(loadfile("scripts/koreader-library-index.lua"))'
 lua -e 'assert(loadfile("patches/1-remagic-storage.lua"))'
 lua -e 'assert(loadfile("patches/2-remagic-runtime.lua"))'
+lua -e 'assert(loadfile("scripts/remagic-lifecycle-async.lua"))'
+lua -e 'assert(loadfile("scripts/remagic-lifecycle-protocol.lua"))'
+lua -e 'assert(loadfile("scripts/remagic-open-path.lua"))'
 bash -n scripts/stage-custom-fonts.sh
 sh tests/test-koreader-remagic.sh
 sh tests/test-manifest-v2.sh

@@ -50,6 +50,9 @@ with tempfile.TemporaryDirectory() as runtime:
         REMAGIC_RUNTIME_DIR=runtime,
         REMAGIC_LIFECYCLE_FD=str(child.fileno()),
         REMAGIC_KOREADER_POLL_SECONDS="0.05",
+        REMAGIC_KOREADER_LIFECYCLE_HELPER=str(
+            Path(patch).resolve().parent.parent / "scripts" / "koreader-lifecycle"
+        ),
     )
     try:
         result = subprocess.run(

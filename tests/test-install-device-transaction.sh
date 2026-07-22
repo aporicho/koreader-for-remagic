@@ -116,6 +116,10 @@ assert_installed() {
     [ -x "$adapter/libexec/koreader-data-migrate" ] || fail "migrator was not installed"
     [ -f "$adapter/share/patches/1-remagic-storage.lua" ] || fail "storage patch was not installed with adapter"
     [ -f "$adapter/share/patches/2-remagic-runtime.lua" ] || fail "runtime patch was not installed with adapter"
+    for module in remagic-lifecycle-async.lua remagic-lifecycle-protocol.lua remagic-open-path.lua; do
+        [ -f "$adapter/libexec/$module" ] || fail "lifecycle module was not installed: $module"
+        [ "$(stat -c %a "$adapter/libexec/$module")" = 644 ] || fail "unsafe lifecycle module mode: $module"
+    done
     [ "$(stat -c %a "$adapter/bin/koreader-remagic")" = 755 ] || fail "wrapper mode is not 0755"
     [ "$(stat -c %a "$adapter/share/patches/2-remagic-runtime.lua")" = 644 ] || fail "patch mode is not 0644"
     [ "$(stat -c %u:%g "$adapter")" = "$(id -u):$(id -g)" ] || fail "adapter owner is not explicit"

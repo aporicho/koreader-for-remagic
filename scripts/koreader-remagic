@@ -10,6 +10,9 @@ KOREADER_SETTINGS=${KOREADER_SETTINGS:-$KOREADER_DATA_DIR/settings.reader.lua}
 KOREADER_MIGRATOR=${KOREADER_MIGRATOR:-/home/root/apps/remagic-koreader/libexec/koreader-data-migrate}
 KOREADER_LIBRARY_SYNC=${KOREADER_LIBRARY_SYNC:-/home/root/apps/remagic-koreader/libexec/koreader-library-sync}
 KOREADER_LIFECYCLE_HELPER=${KOREADER_LIFECYCLE_HELPER:-/home/root/apps/remagic-koreader/libexec/koreader-lifecycle}
+KOREADER_ASYNC_MODULE=${KOREADER_ASYNC_MODULE:-${KOREADER_LIFECYCLE_HELPER%/*}/remagic-lifecycle-async.lua}
+KOREADER_PROTOCOL_MODULE=${KOREADER_PROTOCOL_MODULE:-${KOREADER_LIFECYCLE_HELPER%/*}/remagic-lifecycle-protocol.lua}
+KOREADER_OPEN_PATH_MODULE=${KOREADER_OPEN_PATH_MODULE:-${KOREADER_LIFECYCLE_HELPER%/*}/remagic-open-path.lua}
 KOREADER_PLATFORM_PATCH_DIR=${KOREADER_PLATFORM_PATCH_DIR:-/home/root/apps/remagic-koreader/share/patches}
 KOREADER_STARTUP_SCRIPT=${KOREADER_STARTUP_SCRIPT:-$KOREADER_DIR/koreader.sh}
 KOREADER_ACTIVE_STARTUP_SCRIPT=${KOREADER_ACTIVE_STARTUP_SCRIPT:-/tmp/koreader.sh}
@@ -49,6 +52,12 @@ if [ ! -x "$KOREADER_LIFECYCLE_HELPER" ]; then
     echo "KOReader lifecycle adapter missing: $KOREADER_LIFECYCLE_HELPER" >&2
     exit 1
 fi
+for lifecycle_module in "$KOREADER_ASYNC_MODULE" "$KOREADER_PROTOCOL_MODULE" "$KOREADER_OPEN_PATH_MODULE"; do
+    [ -r "$lifecycle_module" ] || {
+        echo "KOReader lifecycle module missing: $lifecycle_module" >&2
+        exit 1
+    }
+done
 if [ ! -x "$KOREADER_INSTALL_FLOCK" ]; then
     echo "KOReader deployment lock helper missing: $KOREADER_INSTALL_FLOCK" >&2
     exit 1
@@ -71,6 +80,10 @@ export KO_HOME
 export STARDICT_DATA_DIR="${STARDICT_DATA_DIR:-$KOREADER_DATA_DIR/data/dict}"
 export REMAGIC_APP_ID="${REMAGIC_APP_ID:-koreader}"
 export REMAGIC_KOREADER_LIFECYCLE_HELPER="$KOREADER_LIFECYCLE_HELPER"
+export REMAGIC_KOREADER_FLOCK="${REMAGIC_KOREADER_FLOCK:-$KOREADER_INSTALL_FLOCK}"
+export REMAGIC_KOREADER_ASYNC_MODULE="$KOREADER_ASYNC_MODULE"
+export REMAGIC_KOREADER_PROTOCOL_MODULE="$KOREADER_PROTOCOL_MODULE"
+export REMAGIC_KOREADER_OPEN_PATH_MODULE="$KOREADER_OPEN_PATH_MODULE"
 export REMAGIC_ALLOWED_OPEN_ROOTS="${REMAGIC_ALLOWED_OPEN_ROOTS:-${KOREADER_ALLOWED_OPEN_ROOTS:-/home/root/.local/share/remagic-koreader/library:/home/root/books:/home/root/koreader:/home/root/.local/share/remarkable/xochitl}}"
 # The manager knows the wrapper PID only after fork.  The shebang keeps this
 # shell in that same process, so bind KOReader's userpatch markers here before
@@ -113,6 +126,7 @@ acquire_deployment_read_lock() {
         echo "KOReader deployment is in progress; refusing to launch" >&2
         return 1
     }
+    export REMAGIC_KOREADER_DEPLOYMENT_LOCK_FD=$deployment_lock_fd
 }
 
 # The standalone installer holds this same inode exclusively for its complete

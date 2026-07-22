@@ -1,4 +1,4 @@
 # kind<TAB>exact path<TAB>maximum lines<TAB>why keeping this responsibility together is clearer
-file	patches/2-remagic-runtime.lua	720	KOReader loads this as one standard userpatch; keeping the startup hook self-contained avoids package-path coupling and partial multi-file installs during device rollback.
+file	patches/2-remagic-runtime.lua	720	KOReader loads one standard userpatch; lifecycle state orchestration stays in the hook while transport, protocol, and path helpers are installed transactionally beside it.
 file	scripts/install-device.sh	640	The standalone transaction state machine keeps journal validation, rollback, power-loss recovery, and commit ordering together so audits can verify one fail-closed control flow.
 file	scripts/koreader-data-migrate	560	Database selection, recursive legacy merge, locking, backup, and write-boundary checks stay in the executable migrator so standalone and Manager installs cannot omit a security-critical sourced helper.

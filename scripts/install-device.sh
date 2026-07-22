@@ -134,6 +134,9 @@ preflight_commands_and_sources() {
         "$ROOT/scripts/koreader-library-index.lua" \
         "$ROOT/scripts/koreader-not-running" \
         "$ROOT/scripts/koreader-lifecycle" \
+        "$ROOT/scripts/remagic-lifecycle-async.lua" \
+        "$ROOT/scripts/remagic-lifecycle-protocol.lua" \
+        "$ROOT/scripts/remagic-open-path.lua" \
         "$ROOT/patches/1-remagic-storage.lua" \
         "$ROOT/patches/2-remagic-runtime.lua"
     do
@@ -439,6 +442,9 @@ stage_adapter() {
     stage_file "$ROOT/scripts/koreader-library-index.lua" libexec/koreader-library-index.lua 0644
     stage_file "$ROOT/scripts/koreader-not-running" libexec/koreader-not-running 0755
     stage_file "$ROOT/scripts/koreader-lifecycle" libexec/koreader-lifecycle 0755
+    for module in remagic-lifecycle-async.lua remagic-lifecycle-protocol.lua remagic-open-path.lua; do
+        stage_file "$ROOT/scripts/$module" "libexec/$module" 0644
+    done
     stage_file "$ROOT/patches/1-remagic-storage.lua" share/patches/1-remagic-storage.lua 0644
     stage_file "$ROOT/patches/2-remagic-runtime.lua" share/patches/2-remagic-runtime.lua 0644
     (
@@ -447,7 +453,7 @@ stage_adapter() {
             sha256sum "$relative"
         done
     ) >"$TXN_DIR/adapter.sha256"
-    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 10 ] || die "staged adapter manifest is incomplete"
+    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 13 ] || die "staged adapter manifest is incomplete"
     chmod 0600 "$TXN_DIR/adapter.sha256"
     set_installed_owner "$TXN_DIR/adapter.sha256"
 }
@@ -470,7 +476,7 @@ verify_installed_adapter() {
         [ "$(stat -c '%u:%g' "$directory")" = "$INSTALL_UID:$INSTALL_GID" ] || \
             die "installed adapter directory owner is wrong: $directory"
     done
-    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 10 ] || die "adapter manifest is incomplete"
+    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 13 ] || die "adapter manifest is incomplete"
     (cd "$ADAPTER_DIR" && sha256sum -c "$TXN_DIR/adapter.sha256" >/dev/null) || \
         die "installed adapter checksum verification failed"
     verify_installed_file bin/koreader-remagic 755
@@ -481,6 +487,9 @@ verify_installed_adapter() {
     verify_installed_file libexec/koreader-library-index.lua 644
     verify_installed_file libexec/koreader-not-running 755
     verify_installed_file libexec/koreader-lifecycle 755
+    for module in remagic-lifecycle-async.lua remagic-lifecycle-protocol.lua remagic-open-path.lua; do
+        verify_installed_file "libexec/$module" 644
+    done
     verify_installed_file share/patches/1-remagic-storage.lua 644
     verify_installed_file share/patches/2-remagic-runtime.lua 644
 }

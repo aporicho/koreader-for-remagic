@@ -51,6 +51,10 @@ assert_contains 'display = "qtfb"' "$ADAPTER_MANIFEST"
 assert_contains 'resident = true' "$ADAPTER_MANIFEST"
 assert_contains 'KOREADER_LIFECYCLE_HELPER=' "$WRAPPER"
 assert_contains 'REMAGIC_KOREADER_LIFECYCLE_HELPER' "$WRAPPER"
+for module_variable in REMAGIC_KOREADER_ASYNC_MODULE REMAGIC_KOREADER_PROTOCOL_MODULE \
+    REMAGIC_KOREADER_OPEN_PATH_MODULE REMAGIC_KOREADER_FLOCK; do
+    assert_contains "$module_variable" "$WRAPPER"
+done
 assert_contains 'KOREADER_PLATFORM_PATCH_DIR' "$WRAPPER"
 if grep -F 'KO_MULTIUSER' "$WRAPPER" "$ADAPTER_MANIFEST" >/dev/null; then
     fail "KO_MULTIUSER must not split state away from /home/root/apps/koreader"
@@ -120,6 +124,9 @@ printf 'run=%s oneshot=%s mode=%s model=%s input=%s full=%s grab=%s depth=%s arg
     "$QTFB_SHIM_RESPECT_FULL_REFRESH_REQUESTS" "$KO_DONT_GRAB_INPUT" \
     "$KO_DONT_SET_DEPTH" "$#" "${1-}" "$KO_HOME" "$STARDICT_DATA_DIR" \
     "${REMAGIC_INITIAL_OPEN_PATH-}" >>"$TEST_TRACE"
+printf 'async=%s protocol=%s open=%s flock=%s\n' \
+    "$REMAGIC_KOREADER_ASYNC_MODULE" "$REMAGIC_KOREADER_PROTOCOL_MODULE" \
+    "$REMAGIC_KOREADER_OPEN_PATH_MODULE" "$REMAGIC_KOREADER_FLOCK" >>"$TEST_TRACE"
 if [ -n "${TEST_CHILD_PID_FILE:-}" ]; then
     printf '%s\n' "$$" >"$TEST_CHILD_PID_FILE"
 fi
@@ -173,6 +180,10 @@ KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
 assert_contains "run=1 oneshot=1 mode=N_RGB565 model=false input=NATIVE full=1 grab=1 depth=1 argc=1 arg1=$LAST_DIR_TEST" "$TRACE"
 assert_contains "run=2 oneshot=1 mode=N_RGB565 model=false input=NATIVE full=1 grab=1 depth=1 argc=1 arg1=$LAST_DIR_TEST" "$TRACE"
 assert_contains "ko_home=$DATA_HOME_TEST" "$TRACE"
+assert_contains "async=$ROOT/scripts/remagic-lifecycle-async.lua" "$TRACE"
+assert_contains "protocol=$ROOT/scripts/remagic-lifecycle-protocol.lua" "$TRACE"
+assert_contains "open=$ROOT/scripts/remagic-open-path.lua" "$TRACE"
+assert_contains "flock=$KOREADER_INSTALL_FLOCK" "$TRACE"
 [ ! -e "$KOREADER_DIR_TEST/settings.reader.lua" ] || fail "isolated KO_HOME wrote settings into the program tree"
 for platform_patch in 1-remagic-storage.lua 2-remagic-runtime.lua; do
     cmp -s "$KOREADER_PLATFORM_PATCH_DIR/$platform_patch" \
