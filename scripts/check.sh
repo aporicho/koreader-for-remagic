@@ -15,6 +15,8 @@ lua -e 'assert(loadfile("scripts/koreader-library-index.lua"))'
 lua -e 'assert(loadfile("patches/10-remagic-environment.lua"))'
 lua -e 'assert(loadfile("patches/20-remagic-policy.lua"))'
 lua -e 'assert(loadfile("patches/21-remagic-lifecycle-v2.lua"))'
+lua -e 'assert(loadfile("patches/22-remagic-library-collection.lua"))'
+lua -e 'assert(loadfile("scripts/remagic-library-collection.lua"))'
 lua -e 'assert(loadfile("scripts/remagic-lifecycle-protocol.lua"))'
 lua -e 'assert(loadfile("scripts/remagic-open-path.lua"))'
 bash -n scripts/stage-custom-fonts.sh
@@ -26,5 +28,6 @@ sh tests/test-koreader-library-sync.sh
 sh tests/test-koreader-not-running.sh
 sh tests/test-install-device-transaction.sh
 sh tests/test-remagic-runtime-userpatch.sh
+sh tests/test-remagic-library-collection.sh
 sh tests/test-remagic-runtime-fd.sh
 echo "KOReader checks passed"

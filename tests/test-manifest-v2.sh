@@ -15,6 +15,7 @@ manifest = tomllib.loads(path.read_text(encoding="utf-8"))
 assert manifest["schema"] == 2
 assert manifest["id"] == "koreader"
 assert manifest["name"] == "KOReader"
+assert manifest["version"] == "2026.3.0-remagic.4"
 assert manifest["kind"] == "user"
 assert manifest["package"] == "koreader-for-remagic"
 assert manifest["supported_devices"] == ["paper_pro", "paper_pro_move"]
@@ -66,6 +67,12 @@ assert manifest["environment"] == {
     "KOREADER_DATA_DIR": "/home/root/.local/share/koreader-for-remagic/data",
     "KOREADER_SETTINGS": "/home/root/.local/share/koreader-for-remagic/data/settings.reader.lua",
     "KOREADER_BOOKS_DIR": "/home/root/books",
+    "KOREADER_SOURCE_LIBRARY_DIR": "/home/root/.local/share/remarkable/xochitl",
+    "KOREADER_LIBRARY_STATE_ROOT": "/home/root/.local/share/koreader-for-remagic",
+    "KOREADER_LIBRARY_DIR": "/home/root/.local/share/koreader-for-remagic/library",
+    "KOREADER_LIBRARY_INDEX": "/home/root/.local/share/koreader-for-remagic/library.index",
+    "KOREADER_COLLECTION_NAME": "全部书籍",
+    "KOREADER_INSTALL_LOCK": "/home/root/.local/state/koreader-for-remagic/install.lock",
     "KOREADER_BACKUP_ROOT": "/home/root/.local/state/koreader-for-remagic/backups",
     "KOREADER_LEGACY_DATA_DIRS": "/home/root/.local/share/remagic-koreader/data:/home/root/.paperweight/services/koreader/koreader:/home/root/.config/koreader",
 }

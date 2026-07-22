@@ -90,8 +90,9 @@ prepare_case() {
     printf 'clipboard should migrate\n' >"$case_root/home/root/apps/koreader/clipboard/history.lua"
     make_db "$case_root/home/root/apps/koreader/settings/statistics.sqlite3"
     printf '/usr/bin/unrelated\000--serve\000' >"$case_root/proc/101/cmdline"
-    : >"$case_root/home/root/apps/.koreader-for-remagic.install.lock"
-    chmod 0600 "$case_root/home/root/apps/.koreader-for-remagic.install.lock"
+    mkdir -p "$case_root/home/root/.local/state/koreader-for-remagic"
+    : >"$case_root/home/root/.local/state/koreader-for-remagic/install.lock"
+    chmod 0600 "$case_root/home/root/.local/state/koreader-for-remagic/install.lock"
 
     if [ "$mode" = existing ]; then
         mkdir -p \
@@ -121,7 +122,8 @@ assert_installed() {
     [ -x "$adapter/bin/koreader-for-remagic" ] || fail "adapter wrapper was not installed"
     [ -x "$adapter/libexec/koreader-data-migrate" ] || fail "migrator was not installed"
     [ -d "$adapter/share/fonts" ] || fail "adapter font asset directory was not installed"
-    for patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
+    for patch in 10-remagic-environment.lua 20-remagic-policy.lua \
+            21-remagic-lifecycle-v2.lua 22-remagic-library-collection.lua; do
         [ -f "$adapter/share/patches/$patch" ] || fail "platform patch was not installed: $patch"
     done
     for module in remagic-lifecycle-protocol.lua remagic-open-path.lua; do
@@ -276,7 +278,7 @@ same_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 # table scan races or cannot yet identify the just-starting reader.
 prepare_case existing "$case_root"
 tree_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
-shared_lock=$case_root/home/root/apps/.koreader-for-remagic.install.lock
+shared_lock=$case_root/home/root/.local/state/koreader-for-remagic/install.lock
 exec 7>>"$shared_lock"
 flock -s 7
 set +e
@@ -292,7 +294,7 @@ same_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 
 # The live-process guard runs before journal creation or any target mutation.
 prepare_case existing "$case_root"
-rm "$case_root/home/root/apps/.koreader-for-remagic.install.lock"
+rm "$case_root/home/root/.local/state/koreader-for-remagic/install.lock"
 mkdir -p "$case_root/proc/222"
 printf '%s\000%s\000' \
     "$case_root$VENDOR_DIR/reader.lua" \

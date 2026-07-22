@@ -4,7 +4,7 @@ set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 KOREADER_VERSION=v2026.03
 KOREADER_ARCHIVE_SHA256=56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468
-APP_VERSION=2026.3.0-remagic.3
+APP_VERSION=2026.3.0-remagic.4
 
 fail() {
     echo "build-store-package: $*" >&2
@@ -80,12 +80,14 @@ done
 for module in \
     koreader-db-inspect.lua \
     koreader-library-index.lua \
+    remagic-library-collection.lua \
     remagic-lifecycle-protocol.lua \
     remagic-open-path.lua
 do
     stage_file "$ROOT/scripts/$module" "libexec/$module" 0644
 done
-for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
+for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua \
+        21-remagic-lifecycle-v2.lua 22-remagic-library-collection.lua; do
     stage_file "$ROOT/patches/$platform_patch" "share/patches/$platform_patch" 0644
 done
 

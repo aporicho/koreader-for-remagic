@@ -8,7 +8,11 @@ QTFB_SHIM=${QTFB_SHIM:-/home/root/apps/remagic/shims/qtfb-shim.so}
 KOREADER_READER=${KOREADER_READER:-$KOREADER_DIR/reader.lua}
 KOREADER_DATA_DIR=${KOREADER_DATA_DIR:-${KO_HOME:-/home/root/.local/share/koreader-for-remagic/data}}
 KOREADER_BOOKS_DIR=${KOREADER_BOOKS_DIR:-/home/root/books}
+KOREADER_SOURCE_LIBRARY_DIR=${KOREADER_SOURCE_LIBRARY_DIR:-/home/root/.local/share/remarkable/xochitl}
+KOREADER_LIBRARY_STATE_ROOT=${KOREADER_LIBRARY_STATE_ROOT:-/home/root/.local/share/koreader-for-remagic}
 KOREADER_LIBRARY_DIR=${KOREADER_LIBRARY_DIR:-/home/root/.local/share/koreader-for-remagic/library}
+KOREADER_LIBRARY_INDEX=${KOREADER_LIBRARY_INDEX:-$KOREADER_LIBRARY_STATE_ROOT/library.index}
+KOREADER_COLLECTION_NAME=${KOREADER_COLLECTION_NAME:-全部书籍}
 KOREADER_SETTINGS=${KOREADER_SETTINGS:-$KOREADER_DATA_DIR/settings.reader.lua}
 KOREADER_LIBEXEC_DIR=${KOREADER_LIBEXEC_DIR:-$ADAPTER_DIR/libexec}
 KOREADER_MIGRATOR=${KOREADER_MIGRATOR:-$KOREADER_LIBEXEC_DIR/koreader-data-migrate}
@@ -19,7 +23,7 @@ KOREADER_PLATFORM_PATCH_DIR=${KOREADER_PLATFORM_PATCH_DIR:-$ADAPTER_DIR/share/pa
 KOREADER_FONT_DIRECTORIES=${REMAGIC_FONT_DIRECTORIES:-${KOREADER_FONT_DIRECTORIES:-$ADAPTER_DIR/share/fonts}}
 KOREADER_STARTUP_SCRIPT=${KOREADER_STARTUP_SCRIPT:-$KOREADER_DIR/koreader.sh}
 KOREADER_ACTIVE_STARTUP_SCRIPT=${KOREADER_ACTIVE_STARTUP_SCRIPT:-/tmp/koreader.sh}
-KOREADER_INSTALL_LOCK=${KOREADER_INSTALL_LOCK:-/home/root/apps/.koreader-for-remagic.install.lock}
+KOREADER_INSTALL_LOCK=${KOREADER_INSTALL_LOCK:-/home/root/.local/state/koreader-for-remagic/install.lock}
 KOREADER_INSTALL_FLOCK=${KOREADER_INSTALL_FLOCK:-/usr/bin/flock}
 
 # DataStorage reads KO_HOME while the adapter and migration helpers use
@@ -65,7 +69,8 @@ if [ ! -x "$KOREADER_INSTALL_FLOCK" ]; then
     echo "KOReader deployment lock helper missing: $KOREADER_INSTALL_FLOCK" >&2
     exit 1
 fi
-for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
+for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua \
+        21-remagic-lifecycle-v2.lua 22-remagic-library-collection.lua; do
     if [ ! -r "$KOREADER_PLATFORM_PATCH_DIR/$platform_patch" ]; then
         echo "KOReader platform userpatch missing: $KOREADER_PLATFORM_PATCH_DIR/$platform_patch" >&2
         exit 1
@@ -104,6 +109,18 @@ if [ ! -d "$KOREADER_BOOKS_DIR" ] || [ -L "$KOREADER_BOOKS_DIR" ]; then
     echo "KOReader books directory missing or unsafe: $KOREADER_BOOKS_DIR" >&2
     exit 1
 fi
+case "$KOREADER_SOURCE_LIBRARY_DIR:$KOREADER_LIBRARY_STATE_ROOT:$KOREADER_LIBRARY_DIR:$KOREADER_LIBRARY_INDEX" in
+    /*:/*:/*:/*) ;;
+    *) echo "KOReader library paths must be absolute" >&2; exit 1 ;;
+esac
+if [ ! -d "$KOREADER_SOURCE_LIBRARY_DIR" ] || [ -L "$KOREADER_SOURCE_LIBRARY_DIR" ]; then
+    echo "KOReader source library missing or unsafe: $KOREADER_SOURCE_LIBRARY_DIR" >&2
+    exit 1
+fi
+[ -n "$KOREADER_COLLECTION_NAME" ] || {
+    echo "KOReader collection name must not be empty" >&2
+    exit 1
+}
 
 old_ifs=$IFS
 IFS=:
@@ -127,6 +144,12 @@ export HOME="${HOME:-/home/root}"
 export KOREADER_DIR
 export KOREADER_DATA_DIR
 export KO_HOME
+export KOREADER_BOOKS_DIR
+export KOREADER_SOURCE_LIBRARY_DIR
+export KOREADER_LIBRARY_STATE_ROOT
+export KOREADER_LIBRARY_DIR
+export KOREADER_LIBRARY_INDEX
+export KOREADER_COLLECTION_NAME
 export EXT_FONT_DIR
 export STARDICT_DATA_DIR="${STARDICT_DATA_DIR:-$KOREADER_DATA_DIR/data/dict}"
 export REMAGIC_MANAGED="${REMAGIC_MANAGED:-1}"
@@ -234,10 +257,15 @@ sync_platform_patches() {
         return 1
     fi
     mkdir -p "$patch_dir"
-    for legacy_patch in 1-remagic-storage.lua 2-remagic-runtime.lua; do
+    # These names were owned by earlier adapter releases.  In particular,
+    # 15-remagic-library-collection.lua ran too early in KOReader boot; leaving
+    # it beside the replacement would keep breaking every upgraded install.
+    for legacy_patch in 1-remagic-storage.lua 2-remagic-runtime.lua \
+            15-remagic-library-collection.lua; do
         rm -f "$patch_dir/$legacy_patch"
     done
-    for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
+    for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua \
+            21-remagic-lifecycle-v2.lua 22-remagic-library-collection.lua; do
         sync_one_platform_patch \
             "$KOREADER_PLATFORM_PATCH_DIR/$platform_patch" \
             "$patch_dir/$platform_patch"
@@ -321,8 +349,17 @@ if "$KOREADER_LIBRARY_SYNC"; then
     :
 else
     library_sync_status=$?
-    echo "KOReader friendly library synchronization failed (status=$library_sync_status); using $KOREADER_BOOKS_DIR" >&2
+    if [ -d "$KOREADER_LIBRARY_DIR" ]; then
+        echo "KOReader friendly library synchronization failed (status=$library_sync_status); using the previous complete view" >&2
+    else
+        echo "KOReader friendly library synchronization failed (status=$library_sync_status); using $KOREADER_BOOKS_DIR" >&2
+    fi
 fi
+
+directory_has_entries() {
+    [ -d "$1" ] || return 1
+    [ -n "$(find -L "$1" -mindepth 1 -type f -print -quit 2>/dev/null)" ]
+}
 
 select_library_dir() {
     lastdir=
@@ -335,7 +372,7 @@ select_library_dir() {
     # Restore only directories inside the primary books tree or the generated
     # friendly view. This prevents UUID files and .thumbnails from the xochitl
     # store leaking into KOReader's file manager.
-    if [ -n "$lastdir" ] && [ -d "$lastdir" ]; then
+    if [ -n "$lastdir" ] && directory_has_entries "$lastdir"; then
         case "$lastdir/" in
             "$KOREADER_BOOKS_DIR/"|"$KOREADER_BOOKS_DIR/"*)
                 echo "KOReader: library_dir=$lastdir source=lastdir" >&2
@@ -350,8 +387,13 @@ select_library_dir() {
         esac
     fi
 
-    echo "KOReader: library_dir=$KOREADER_BOOKS_DIR source=fallback" >&2
-    printf '%s\n' "$KOREADER_BOOKS_DIR"
+    if directory_has_entries "$KOREADER_LIBRARY_DIR"; then
+        echo "KOReader: library_dir=$KOREADER_LIBRARY_DIR source=friendly-fallback" >&2
+        printf '%s\n' "$KOREADER_LIBRARY_DIR"
+    else
+        echo "KOReader: library_dir=$KOREADER_BOOKS_DIR source=empty-fallback" >&2
+        printf '%s\n' "$KOREADER_BOOKS_DIR"
+    fi
 }
 
 # Passing a directory explicitly forces KOReader into its file manager. With

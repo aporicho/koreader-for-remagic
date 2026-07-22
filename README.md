@@ -30,6 +30,8 @@ ReMagic 构建时校验官方压缩包和完整文件清单，并把 vendor 作�
 
 - `10-remagic-environment.lua`：把 `version.log` 重定向到 KO_HOME，并让托管环境
   使用原生 `EXT_FONT_DIR` 外置字体路径；
+- `22-remagic-library-collection.lua`：在 KOReader UI 初始化后把官方友好书库与 `/home/root/books` 接入
+  KOReader 原生“全部书籍”集合，并保护官方 UUID 文件不被修改；
 - `20-remagic-policy.lua`：通过 `plugins_disabled.terminal=true` 禁用 Terminal，
   同时隐藏由 ReMagic 接管的 OTA；
 - `21-remagic-lifecycle-v2.lua`：提供语义 ready、保存、前后台、同 PID 开书和
@@ -93,9 +95,10 @@ wrapper 只复现上游脚本安全的 `/tmp/koreader.sh` 同步步骤。返回�
 重新启动，其他返回码交回 ReMagic。
 
 每次启动会从 reMarkable `.metadata` 原子生成友好书库视图：优先链接 EPUB，其次
-PDF，不修改、移动或删除 xochitl 文件。无参数首次启动进入
-`/home/root/books`；之后只恢复该书库或生成视图内的有效目录。`read 书名` 可以
-通过 `open_path` 在同一个驻留 PID 中开书。
+PDF，不修改、移动或删除 xochitl 文件。无参数冷启动进入 KOReader 原生“全部书籍”
+集合，该集合连接友好书库与 `/home/root/books`；空的历史目录不会遮住已有书籍。
+集合显示友好中文书名，但保持官方 UUID 文件身份以延续阅读进度。`read 书名` 可以
+通过 `open_path` 在同一个驻留 PID 中直接开书，不经过集合首页。
 
 ## 字体
 

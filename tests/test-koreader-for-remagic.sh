@@ -54,6 +54,7 @@ for module_variable in REMAGIC_KOREADER_LIBEXEC_DIR REMAGIC_KOREADER_FLOCK; do
     assert_contains "$module_variable" "$WRAPPER"
 done
 assert_contains 'KOREADER_PLATFORM_PATCH_DIR' "$WRAPPER"
+assert_contains 'KOREADER_INSTALL_LOCK=${KOREADER_INSTALL_LOCK:-/home/root/.local/state/koreader-for-remagic/install.lock}' "$WRAPPER"
 assert_contains "EXT_FONT_DIR=\$(printf '%s' \"\$KOREADER_FONT_DIRECTORIES\" | tr ':' ';')" "$WRAPPER"
 if grep -F 'KO_MULTIUSER' "$WRAPPER" "$ADAPTER_MANIFEST" >/dev/null; then
     fail "KO_MULTIUSER must not split state away from /home/root/apps/koreader"
@@ -87,11 +88,17 @@ export REMAGIC_DEVICE_PROFILE=$PAPER_PRO_PROFILE
 export KOREADER_LIBEXEC_DIR=$ROOT/scripts
 LIBRARY_DIR_TEST=$TMPDIR_TEST/library
 BOOKS_DIR_TEST=$TMPDIR_TEST/books
+SOURCE_LIBRARY_TEST=$TMPDIR_TEST/xochitl
 LAST_DIR_TEST=$LIBRARY_DIR_TEST/分册
 BOOKS_LAST_DIR_TEST=$BOOKS_DIR_TEST/长篇
 OUTSIDE_DIR_TEST=$TMPDIR_TEST/outside
-mkdir -p "$LAST_DIR_TEST" "$BOOKS_LAST_DIR_TEST" "$OUTSIDE_DIR_TEST"
+mkdir -p "$LAST_DIR_TEST" "$BOOKS_LAST_DIR_TEST" "$SOURCE_LIBRARY_TEST" "$OUTSIDE_DIR_TEST"
+: >"$LAST_DIR_TEST/论语.epub"
 export KOREADER_BOOKS_DIR=$BOOKS_DIR_TEST
+export KOREADER_SOURCE_LIBRARY_DIR=$SOURCE_LIBRARY_TEST
+export KOREADER_LIBRARY_STATE_ROOT=$TMPDIR_TEST
+export KOREADER_LIBRARY_INDEX=$TMPDIR_TEST/library.index
+export KOREADER_COLLECTION_NAME=全部书籍
 SETTINGS_TEST=$DATA_HOME_TEST/settings.reader.lua
 TRACE=$TMPDIR_TEST/trace
 STATE=$TMPDIR_TEST/state
@@ -135,6 +142,9 @@ printf 'libexec=%s fonts=%s managed=%s flock=%s\n' \
     "$REMAGIC_KOREADER_LIBEXEC_DIR" "$EXT_FONT_DIR" "$REMAGIC_MANAGED" \
     "$REMAGIC_KOREADER_FLOCK" >>"$TEST_TRACE"
 printf 'device_profile=%s\n' "$REMAGIC_DEVICE_PROFILE" >>"$TEST_TRACE"
+printf 'collection=%s source_library=%s library_index=%s\n' \
+    "$KOREADER_COLLECTION_NAME" "$KOREADER_SOURCE_LIBRARY_DIR" \
+    "$KOREADER_LIBRARY_INDEX" >>"$TEST_TRACE"
 if [ -n "${TEST_CHILD_PID_FILE:-}" ]; then
     printf '%s\n' "$$" >"$TEST_CHILD_PID_FILE"
 fi
@@ -211,6 +221,12 @@ set -e
 assert_contains 'REMAGIC_DEVICE_PROFILE schema v1 is required' "$MISSING_PROFILE_LOG"
 [ ! -e "$TRACE" ] || fail "reader.lua ran without a ReMagic device profile"
 
+# Reproduce an in-place upgrade from the first .4 candidate.  Its collection
+# patch used KOReader's early priority and must be removed before reader.lua
+# gets a chance to discover userpatches.
+printf '%s\n' 'error("obsolete early collection patch was loaded")' \
+    >"$DATA_HOME_TEST/patches/15-remagic-library-collection.lua"
+
 TEST_STATE=$STATE TEST_TRACE=$TRACE TEST_RESTART_ONCE=1 \
 KOREADER_DIR=$KOREADER_DIR_TEST QTFB_SHIM=$HOST_PRELOAD \
 KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
@@ -219,6 +235,8 @@ KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
         fail "wrapper failed its managed-runtime launch"
     }
 [ "$(cat "$STATE")" -eq 2 ] || fail "exit 85 did not restart reader.lua exactly once"
+[ ! -e "$DATA_HOME_TEST/patches/15-remagic-library-collection.lua" ] \
+    || fail "obsolete early collection patch survived the adapter upgrade"
 assert_contains "run=1 oneshot=1 mode=N_RGB565 model=false input=NATIVE full=1 grab=1 depth=1 argc=1 arg1=$LAST_DIR_TEST" "$TRACE"
 assert_contains "run=2 oneshot=1 mode=N_RGB565 model=false input=NATIVE full=1 grab=1 depth=1 argc=1 arg1=$LAST_DIR_TEST" "$TRACE"
 assert_contains "ko_home=$DATA_HOME_TEST" "$TRACE"
@@ -227,8 +245,10 @@ assert_contains "fonts=$FONT_ONE;$FONT_TWO" "$TRACE"
 assert_contains "managed=1" "$TRACE"
 assert_contains "flock=$KOREADER_INSTALL_FLOCK" "$TRACE"
 assert_contains "device_profile=$PAPER_PRO_PROFILE" "$TRACE"
+assert_contains "collection=全部书籍 source_library=$SOURCE_LIBRARY_TEST library_index=$TMPDIR_TEST/library.index" "$TRACE"
 [ ! -e "$KOREADER_DIR_TEST/settings.reader.lua" ] || fail "isolated KO_HOME wrote settings into the program tree"
-for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
+for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua \
+        21-remagic-lifecycle-v2.lua 22-remagic-library-collection.lua; do
     cmp -s "$KOREADER_PLATFORM_PATCH_DIR/$platform_patch" \
         "$DATA_HOME_TEST/patches/$platform_patch" \
         || fail "isolated KO_HOME did not receive $platform_patch"
@@ -261,8 +281,8 @@ rmdir "$ACTIVE_STARTUP_SCRIPT"
 printf '%s\n' '#!/bin/sh' 'echo installed-startup-v1' >"$ACTIVE_STARTUP_SCRIPT"
 chmod 0755 "$ACTIVE_STARTUP_SCRIPT"
 
-# A stale lastdir outside the document library must not reopen a broad parent;
-# an explicit library argument forces KOReader's file manager instead.
+# A stale lastdir outside the document library must not reopen a broad parent.
+# The populated friendly view takes precedence over an empty /books fallback.
 cat >"$SETTINGS_TEST" <<EOF
 return {
     ["lastdir"] = "$OUTSIDE_DIR_TEST",
@@ -279,13 +299,45 @@ TEST_STATE=$STATE TEST_TRACE=$TRACE \
 KOREADER_DIR=$KOREADER_DIR_TEST QTFB_SHIM=$HOST_PRELOAD \
 KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
     "$WRAPPER" 2>"$WRAPPER_LOG"
-assert_contains "argc=1 arg1=$BOOKS_DIR_TEST" "$TRACE"
-assert_contains "KOReader: library_dir=$BOOKS_DIR_TEST source=fallback" "$WRAPPER_LOG"
+assert_contains "argc=1 arg1=$LIBRARY_DIR_TEST" "$TRACE"
+assert_contains "KOReader: library_dir=$LIBRARY_DIR_TEST source=friendly-fallback" "$WRAPPER_LOG"
 assert_contains "device_profile=$PAPER_PRO_MOVE_PROFILE" "$TRACE"
 [ "$(wc -l <"$LIBRARY_SYNC_TRACE")" -eq 2 ] || fail "second wrapper launch did not synchronize the friendly library"
 cmp -s "$STARTUP_SCRIPT" "$ACTIVE_STARTUP_SCRIPT" || fail "second launch left a stale active startup script"
 [ ! -L "$ACTIVE_STARTUP_SCRIPT" ] || fail "startup synchronization left an attacker-controlled symlink"
 assert_contains 'must not be overwritten through a symlink' "$STARTUP_SENTINEL"
+
+# This is the exact device regression: lastdir points at the valid but empty
+# /books root while the generated friendly view contains books.
+cat >"$SETTINGS_TEST" <<EOF
+return {
+    ["lastdir"] = "$BOOKS_DIR_TEST",
+}
+EOF
+rm -f "$STATE" "$TRACE" "$WRAPPER_LOG"
+TEST_STATE=$STATE TEST_TRACE=$TRACE \
+KOREADER_DIR=$KOREADER_DIR_TEST QTFB_SHIM=$HOST_PRELOAD \
+KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
+    "$WRAPPER" 2>"$WRAPPER_LOG"
+assert_contains "argc=1 arg1=$LIBRARY_DIR_TEST" "$TRACE"
+assert_contains "KOReader: library_dir=$LIBRARY_DIR_TEST source=friendly-fallback" "$WRAPPER_LOG"
+
+# A non-empty remembered manual directory remains valid; the adapter only
+# rejects stale or empty history and never forces the official view over an
+# intentional /books location.
+: >"$BOOKS_LAST_DIR_TEST/手动书籍.epub"
+cat >"$SETTINGS_TEST" <<EOF
+return {
+    ["lastdir"] = "$BOOKS_LAST_DIR_TEST",
+}
+EOF
+rm -f "$STATE" "$TRACE" "$WRAPPER_LOG"
+TEST_STATE=$STATE TEST_TRACE=$TRACE \
+KOREADER_DIR=$KOREADER_DIR_TEST QTFB_SHIM=$HOST_PRELOAD \
+KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
+    "$WRAPPER" 2>"$WRAPPER_LOG"
+assert_contains "argc=1 arg1=$BOOKS_LAST_DIR_TEST" "$TRACE"
+assert_contains "KOReader: library_dir=$BOOKS_LAST_DIR_TEST source=lastdir" "$WRAPPER_LOG"
 
 rm -f "$STATE" "$TRACE"
 BOOK_PATH="$TMPDIR_TEST/一本 有空格的书.epub"

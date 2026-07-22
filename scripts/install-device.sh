@@ -81,12 +81,14 @@ ADAPTER_RELEASE_HASH=$(
         scripts/koreader-db-inspect.lua \
         scripts/koreader-library-sync \
         scripts/koreader-library-index.lua \
+        scripts/remagic-library-collection.lua \
         scripts/koreader-not-running \
         scripts/remagic-lifecycle-protocol.lua \
         scripts/remagic-open-path.lua \
         patches/10-remagic-environment.lua \
         patches/20-remagic-policy.lua \
-        patches/21-remagic-lifecycle-v2.lua
+        patches/21-remagic-lifecycle-v2.lua \
+        patches/22-remagic-library-collection.lua
     do
         sha256sum "$release_input" >>"$digest_input" || exit 1
     done
@@ -112,7 +114,7 @@ BACKUP_ROOT=$STATE_PARENT/backups
 TXN_DIR=$APPS_DIR/.koreader-for-remagic.install-transaction
 TXN_PREP=$APPS_DIR/.koreader-for-remagic.install-preparing
 TXN_GC=$APPS_DIR/.koreader-for-remagic.install-garbage
-LOCK_FILE=$APPS_DIR/.koreader-for-remagic.install.lock
+LOCK_FILE=$STATE_PARENT/install.lock
 TXN_STATE=$TXN_DIR/state
 ADAPTER_STAGE=$TXN_DIR/adapter-new
 ADAPTER_OLD=$TXN_DIR/adapter-old
@@ -161,12 +163,14 @@ preflight_commands_and_sources() {
         "$ROOT/scripts/koreader-db-inspect.lua" \
         "$ROOT/scripts/koreader-library-sync" \
         "$ROOT/scripts/koreader-library-index.lua" \
+        "$ROOT/scripts/remagic-library-collection.lua" \
         "$ROOT/scripts/koreader-not-running" \
         "$ROOT/scripts/remagic-lifecycle-protocol.lua" \
         "$ROOT/scripts/remagic-open-path.lua" \
         "$ROOT/patches/10-remagic-environment.lua" \
         "$ROOT/patches/20-remagic-policy.lua" \
-        "$ROOT/patches/21-remagic-lifecycle-v2.lua"
+        "$ROOT/patches/21-remagic-lifecycle-v2.lua" \
+        "$ROOT/patches/22-remagic-library-collection.lua"
     do
         require_regular_file "$source_path"
     done
@@ -367,18 +371,7 @@ finalize_committed_transaction() {
             [ -f "$backup_identity" ] && [ ! -L "$backup_identity" ] && \
                 [ "$(sed -n '1p' "$backup_identity")" = "$transaction_id" ] || \
                 die "migration backup identity is missing or invalid"
-            local_state=$PREFIX/home/root/.local/state
-            if path_exists "$local_state"; then require_real_dir "$local_state"; else
-                require_real_dir "$PREFIX/home/root/.local"
-                mkdir "$local_state"
-                chmod 0755 "$local_state"
-                set_installed_owner "$local_state"
-            fi
-            if path_exists "$STATE_PARENT"; then require_real_dir "$STATE_PARENT"; else
-                mkdir "$STATE_PARENT"
-                chmod 0755 "$STATE_PARENT"
-                set_installed_owner "$STATE_PARENT"
-            fi
+            ensure_state_parent
             if path_exists "$BACKUP_ROOT"; then require_real_dir "$BACKUP_ROOT"; else
                 mkdir "$BACKUP_ROOT"
                 chmod 0700 "$BACKUP_ROOT"
@@ -488,10 +481,11 @@ stage_adapter() {
     stage_file "$ROOT/scripts/koreader-library-sync" libexec/koreader-library-sync 0755
     stage_file "$ROOT/scripts/koreader-library-index.lua" libexec/koreader-library-index.lua 0644
     stage_file "$ROOT/scripts/koreader-not-running" libexec/koreader-not-running 0755
-    for module in remagic-lifecycle-protocol.lua remagic-open-path.lua; do
+    for module in remagic-library-collection.lua remagic-lifecycle-protocol.lua remagic-open-path.lua; do
         stage_file "$ROOT/scripts/$module" "libexec/$module" 0644
     done
-    for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
+    for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua \
+            21-remagic-lifecycle-v2.lua 22-remagic-library-collection.lua; do
         stage_file "$ROOT/patches/$platform_patch" "share/patches/$platform_patch" 0644
     done
     (
@@ -500,7 +494,7 @@ stage_adapter() {
             sha256sum "$relative"
         done
     ) >"$TXN_DIR/adapter.sha256"
-    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 12 ] || die "staged adapter manifest is incomplete"
+    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 14 ] || die "staged adapter manifest is incomplete"
     chmod 0600 "$TXN_DIR/adapter.sha256"
     set_installed_owner "$TXN_DIR/adapter.sha256"
 }
@@ -524,7 +518,7 @@ verify_installed_adapter() {
         [ "$(stat -c '%u:%g' "$directory")" = "$INSTALL_UID:$INSTALL_GID" ] || \
             die "installed adapter directory owner is wrong: $directory"
     done
-    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 12 ] || die "adapter manifest is incomplete"
+    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 14 ] || die "adapter manifest is incomplete"
     (cd "$ADAPTER_DIR" && sha256sum -c "$TXN_DIR/adapter.sha256" >/dev/null) || \
         die "installed adapter checksum verification failed"
     verify_installed_file bin/koreader-for-remagic 755
@@ -534,10 +528,11 @@ verify_installed_adapter() {
     verify_installed_file libexec/koreader-library-sync 755
     verify_installed_file libexec/koreader-library-index.lua 644
     verify_installed_file libexec/koreader-not-running 755
-    for module in remagic-lifecycle-protocol.lua remagic-open-path.lua; do
+    for module in remagic-library-collection.lua remagic-lifecycle-protocol.lua remagic-open-path.lua; do
         verify_installed_file "libexec/$module" 644
     done
-    for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
+    for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua \
+            21-remagic-lifecycle-v2.lua 22-remagic-library-collection.lua; do
         verify_installed_file "share/patches/$platform_patch" 644
     done
 }
@@ -629,6 +624,17 @@ acquire_install_lock() {
     flock -x -n 8 || die "KOReader is starting/running or another standalone installer holds the transaction lock"
 }
 
+ensure_state_parent() {
+    local_state=$PREFIX/home/root/.local/state
+    for state_dir in "$local_state" "$STATE_PARENT"; do
+        if path_exists "$state_dir"; then require_real_dir "$state_dir"; continue; fi
+        [ "$state_dir" != "$local_state" ] || require_real_dir "$PREFIX/home/root/.local"
+        mkdir "$state_dir"
+        chmod 0755 "$state_dir"
+        set_installed_owner "$state_dir"
+    done
+}
+
 commit_trees() {
     write_state adapter_switching
     test_hook adapter_switching
@@ -665,6 +671,7 @@ commit_trees() {
 preflight_commands_and_sources
 preflight_targets
 run_not_running_check
+ensure_state_parent
 acquire_install_lock
 recover_or_refuse_transaction
 preflight_targets
