@@ -360,7 +360,7 @@ while [ ! -e "$ready_file" ] && [ "$attempts" -lt 200 ]; do
 done
 [ -e "$ready_file" ] || fail "blocking migration did not acquire its lock"
 lock_dir=$active/.remagic-data-migrate.lock
-[ "$(cat "$lock_dir/owner")" = remagic-koreader-data-migrate ] || fail "migration lock has no owner identity"
+[ "$(cat "$lock_dir/owner")" = koreader-for-remagic-data-migrate ] || fail "migration lock has no owner identity"
 lock_pid=$(cat "$lock_dir/pid")
 [ "$lock_pid" = "$first_migration_pid" ] || fail "migration lock PID does not identify its owner"
 kill -0 "$lock_pid" 2>/dev/null || fail "recorded migration owner is not alive"
@@ -407,7 +407,7 @@ grep -q "Removing stale KOReader data migration lock (pid=$lock_pid)" "$case8/re
     fail "stale lock recovery was not reported"
 [ ! -d "$lock_dir" ] || fail "stale migration lock survived successful recovery"
 
-grep -F 'BACKUP_ROOT=${KOREADER_BACKUP_ROOT:-/home/root/.local/state/remagic-koreader/backups}' "$MIGRATOR" >/dev/null || \
+grep -F 'BACKUP_ROOT=${KOREADER_BACKUP_ROOT:-/home/root/.local/state/koreader-for-remagic/backups}' "$MIGRATOR" >/dev/null || \
     fail "persistent backup root regressed into an application directory"
 
 echo "koreader data migration tests passed"

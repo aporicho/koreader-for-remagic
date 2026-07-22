@@ -2,15 +2,15 @@
 set -eu
 
 KOREADER_DIR=${KOREADER_DIR:-/home/root/apps/koreader}
-KOREADER_DATA_DIR=${KOREADER_DATA_DIR:-${KO_HOME:-/home/root/.local/share/remagic-koreader/data}}
+KOREADER_DATA_DIR=${KOREADER_DATA_DIR:-${KO_HOME:-/home/root/.local/share/koreader-for-remagic/data}}
 # The Manager executes a validated migrator through /proc/self/fd/N so the
 # opened inode cannot be swapped after validation. In that mode $0 names the
 # descriptor, not this installed directory; never derive sibling helpers from
 # it. Production supplies the same explicit root in the application manifest.
-KOREADER_LIBEXEC_DIR=${KOREADER_LIBEXEC_DIR:-/home/root/apps/remagic-koreader/libexec}
+KOREADER_LIBEXEC_DIR=${KOREADER_LIBEXEC_DIR:-/home/root/apps/koreader-for-remagic/libexec}
 DB_INSPECTOR=${KOREADER_DB_INSPECTOR:-$KOREADER_LIBEXEC_DIR/koreader-db-inspect}
-LEGACY_DATA_DIRS=${KOREADER_LEGACY_DATA_DIRS:-$KOREADER_DIR:/home/root/.paperweight/services/koreader/koreader:/home/root/.config/koreader}
-BACKUP_ROOT=${KOREADER_BACKUP_ROOT:-/home/root/.local/state/remagic-koreader/backups}
+LEGACY_DATA_DIRS=${KOREADER_LEGACY_DATA_DIRS:-/home/root/.local/share/remagic-koreader/data:$KOREADER_DIR:/home/root/.paperweight/services/koreader/koreader:/home/root/.config/koreader}
+BACKUP_ROOT=${KOREADER_BACKUP_ROOT:-/home/root/.local/state/koreader-for-remagic/backups}
 TARGET_SETTINGS=$KOREADER_DATA_DIR/settings
 TARGET_DB=$TARGET_SETTINGS/statistics.sqlite3
 USER_DATA_PATHS="settings.reader.lua settings.reader.lua.old history.lua defaults.custom.lua settings docsettings hashdocsettings history screenshots styletweaks sync clipboard data/dict data/tessdata"
@@ -155,7 +155,7 @@ esac
 
 LOCK_DIR=$KOREADER_DATA_DIR/.remagic-data-migrate.lock
 LOCK_GUARD=$KOREADER_DATA_DIR/.remagic-data-migrate.guard
-LOCK_OWNER=remagic-koreader-data-migrate
+LOCK_OWNER=koreader-for-remagic-data-migrate
 LOCK_HELD=0
 
 # flock only serializes the very short inspect/reclaim/create transaction. The

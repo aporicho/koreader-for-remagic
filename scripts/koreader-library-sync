@@ -3,7 +3,7 @@ set -eu
 
 KOREADER_DIR=${KOREADER_DIR:-/home/root/apps/koreader}
 SOURCE_DIR=${KOREADER_SOURCE_LIBRARY_DIR:-/home/root/.local/share/remarkable/xochitl}
-STATE_ROOT=${KOREADER_LIBRARY_STATE_ROOT:-/home/root/.local/share/remagic-koreader}
+STATE_ROOT=${KOREADER_LIBRARY_STATE_ROOT:-/home/root/.local/share/koreader-for-remagic}
 LIBRARY_DIR=${KOREADER_LIBRARY_DIR:-$STATE_ROOT/library}
 GENERATION_ROOT=$STATE_ROOT/.library-generations
 INDEX_FILE=$STATE_ROOT/library.index

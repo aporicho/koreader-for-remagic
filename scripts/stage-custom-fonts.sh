@@ -27,4 +27,15 @@ stage_font 00e349cc5211e9e044ad9947351daf2f415188a136ed27a2ed825d9cbd9ffe35 \
 stage_font dbbdf59d7035d980abecf4f820e615b72107865a00f6eb41a1bbb9d9d1492fd1 \
     "$YASONG_FONT" FZPingXianYaSong.ttf
 
+(
+    cd "$OUTPUT"
+    sha256sum \
+        STDongGuanTi-Regular.ttf \
+        STDongGuanTi-Bold.ttf \
+        STDongGuanTi-Light.ttf \
+        FZPingXianYaSong.ttf >fonts.sha256
+    sha256sum -c fonts.sha256 >/dev/null
+)
+chmod 0644 "$OUTPUT"/*.ttf "$OUTPUT/fonts.sha256"
+
 printf 'Staged KOReader fonts in %s\n' "$OUTPUT"

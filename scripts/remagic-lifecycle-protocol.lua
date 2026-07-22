@@ -1,4 +1,4 @@
--- Encoding and identity checks for Remagic lifecycle protocol v2.
+-- Encoding and identity checks for ReMagic lifecycle protocol v2.
 
 return function(options)
     local json = assert(options.json)

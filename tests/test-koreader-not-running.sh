@@ -30,9 +30,11 @@ grep -q 'will not terminate' "$TMPDIR_TEST/running.log" || fail "refusal did not
 
 rm -rf "$PROC_ROOT/202"
 mkdir -p "$PROC_ROOT/303"
-printf '/bin/sh\000/home/root/apps/remagic-koreader/bin/koreader-remagic\000' >"$PROC_ROOT/303/cmdline"
+adapter_exec=/home/root/apps/koreader-for-remagic/adapter/releases/test/bin/koreader-for-remagic
+printf '/bin/sh\000%s\000' "$adapter_exec" >"$PROC_ROOT/303/cmdline"
 set +e
-KOREADER_PROC_ROOT=$PROC_ROOT "$CHECKER" 2>"$TMPDIR_TEST/wrapper.log"
+KOREADER_PROC_ROOT=$PROC_ROOT KOREADER_ADAPTER_EXEC=$adapter_exec \
+    "$CHECKER" 2>"$TMPDIR_TEST/wrapper.log"
 status=$?
 set -e
 [ "$status" -eq 1 ] || fail "running adapter wrapper was not detected"

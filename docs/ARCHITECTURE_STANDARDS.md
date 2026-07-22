@@ -3,7 +3,7 @@
 This repository is a KOReader adaptation, not a second system manager. It owns
 KOReader-specific launch preparation, data migration, library indexing, and the
 small lifecycle user patch. Display ownership, raw input, foreground leases,
-and process supervision belong to Remagic.
+and process supervision belong to ReMagic.
 
 - Production files target at most 400 physical lines and fail above 500 by
   default. A cohesive adapter that is clearer intact may use one exact-path,

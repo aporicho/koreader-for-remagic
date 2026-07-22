@@ -217,7 +217,7 @@ for _, record in ipairs(records) do
     used[candidate] = true
 end
 
-io.write("# remagic-koreader-library-v1\n")
+io.write("# koreader-for-remagic-library-v1\n")
 for _, record in ipairs(records) do
     io.write(record.uuid, "\t", record.extension:sub(2), "\t", record.filename, "\n")
 end

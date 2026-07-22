@@ -20,4 +20,4 @@ command -v python3 >/dev/null 2>&1 || {
 python3 "$ROOT/tests/remagic-runtime-fd-test.py" \
     "$LUAJIT" \
     "$ROOT/tests/remagic-runtime-userpatch-mock.lua" \
-    "$ROOT/patches/2-remagic-runtime.lua"
+    "$ROOT/patches/21-remagic-lifecycle-v2.lua"

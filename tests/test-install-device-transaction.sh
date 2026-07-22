@@ -6,6 +6,7 @@ INSTALLER=$ROOT/scripts/install-device.sh
 TMPDIR_TEST=$(mktemp -d)
 trap 'rm -rf "$TMPDIR_TEST"' EXIT HUP INT TERM
 unset KOREADER_DIR
+VENDOR_DIR=/home/root/apps/koreader-for-remagic/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader
 
 fail() {
     echo "FAIL: $*" >&2
@@ -65,20 +66,23 @@ prepare_case() {
     case_root=$2
     rm -rf "$case_root"
     mkdir -p \
-        "$case_root/home/root/apps/koreader" \
+        "$case_root$VENDOR_DIR" \
         "$case_root/home/root/.local/share" \
         "$case_root/home/root/.local/state" \
         "$case_root/proc/101"
-    printf 'remagic-koreader-installer-test-root-v1\n' >"$case_root/.remagic-koreader-installer-test-root"
-    printf '#!/bin/sh\nexit 0\n' >"$case_root/home/root/apps/koreader/reader.lua"
-    chmod 0755 "$case_root/home/root/apps/koreader/reader.lua"
-    printf 'program must remain byte-identical\n' >"$case_root/home/root/apps/koreader/program-sentinel"
+    printf 'koreader-for-remagic-installer-test-root-v1\n' >"$case_root/.koreader-for-remagic-installer-test-root"
+    printf '#!/bin/sh\nexit 0\n' >"$case_root$VENDOR_DIR/reader.lua"
+    chmod 0755 "$case_root$VENDOR_DIR/reader.lua"
+    printf 'program must remain byte-identical\n' >"$case_root$VENDOR_DIR/program-sentinel"
     mkdir -p \
+        "$case_root/home/root/apps/koreader/clipboard" \
         "$case_root/home/root/apps/koreader/plugins/legacy.plugin" \
         "$case_root/home/root/apps/koreader/patches" \
         "$case_root/home/root/apps/koreader/cache" \
-        "$case_root/home/root/apps/koreader/ota" \
-        "$case_root/home/root/apps/koreader/clipboard"
+        "$case_root/home/root/apps/koreader/ota"
+    mkdir -p "$case_root/home/root/.local/share/remagic-koreader/data/history"
+    printf 'renamed layout should migrate\n' \
+        >"$case_root/home/root/.local/share/remagic-koreader/data/history/renamed.lua"
     printf 'do not migrate plugin\n' >"$case_root/home/root/apps/koreader/plugins/legacy.plugin/main.lua"
     printf 'do not migrate patch\n' >"$case_root/home/root/apps/koreader/patches/0-legacy.lua"
     printf 'do not migrate cache\n' >"$case_root/home/root/apps/koreader/cache/item"
@@ -86,16 +90,15 @@ prepare_case() {
     printf 'clipboard should migrate\n' >"$case_root/home/root/apps/koreader/clipboard/history.lua"
     make_db "$case_root/home/root/apps/koreader/settings/statistics.sqlite3"
     printf '/usr/bin/unrelated\000--serve\000' >"$case_root/proc/101/cmdline"
-    : >"$case_root/home/root/apps/.remagic-koreader.install.lock"
-    chmod 0600 "$case_root/home/root/apps/.remagic-koreader.install.lock"
+    : >"$case_root/home/root/apps/.koreader-for-remagic.install.lock"
+    chmod 0600 "$case_root/home/root/apps/.koreader-for-remagic.install.lock"
 
     if [ "$mode" = existing ]; then
         mkdir -p \
-            "$case_root/home/root/apps/remagic-koreader" \
-            "$case_root/home/root/.local/share/remagic-koreader/data/settings"
-        printf 'old adapter\n' >"$case_root/home/root/apps/remagic-koreader/old-only"
-        printf 'current data\n' >"$case_root/home/root/.local/share/remagic-koreader/data/current-only"
-        make_db "$case_root/home/root/.local/share/remagic-koreader/data/settings/statistics.sqlite3"
+            "$case_root/home/root/.local/share/koreader-for-remagic/data/settings"
+        printf 'existing app root\n' >"$case_root/home/root/apps/koreader-for-remagic/old-only"
+        printf 'current data\n' >"$case_root/home/root/.local/share/koreader-for-remagic/data/current-only"
+        make_db "$case_root/home/root/.local/share/koreader-for-remagic/data/settings/statistics.sqlite3"
     fi
 }
 
@@ -110,27 +113,33 @@ run_installer() {
 
 assert_installed() {
     case_root=$1
-    adapter=$case_root/home/root/apps/remagic-koreader
-    data=$case_root/home/root/.local/share/remagic-koreader/data
-    [ -x "$adapter/bin/koreader-remagic" ] || fail "adapter wrapper was not installed"
+    releases=$case_root/home/root/apps/koreader-for-remagic/adapter/releases
+    [ -d "$releases" ] || fail "adapter release directory was not installed"
+    adapter=$(find "$releases" -mindepth 1 -maxdepth 1 -type d -name 'standalone-*' -print)
+    [ "$(printf '%s\n' "$adapter" | sed '/^$/d' | wc -l)" -eq 1 ] || fail "adapter release is not unique"
+    data=$case_root/home/root/.local/share/koreader-for-remagic/data
+    [ -x "$adapter/bin/koreader-for-remagic" ] || fail "adapter wrapper was not installed"
     [ -x "$adapter/libexec/koreader-data-migrate" ] || fail "migrator was not installed"
-    [ -f "$adapter/share/patches/1-remagic-storage.lua" ] || fail "storage patch was not installed with adapter"
-    [ -f "$adapter/share/patches/2-remagic-runtime.lua" ] || fail "runtime patch was not installed with adapter"
-    for module in remagic-lifecycle-async.lua remagic-lifecycle-protocol.lua remagic-open-path.lua; do
+    [ -d "$adapter/share/fonts" ] || fail "adapter font asset directory was not installed"
+    for patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
+        [ -f "$adapter/share/patches/$patch" ] || fail "platform patch was not installed: $patch"
+    done
+    for module in remagic-lifecycle-protocol.lua remagic-open-path.lua; do
         [ -f "$adapter/libexec/$module" ] || fail "lifecycle module was not installed: $module"
         [ "$(stat -c %a "$adapter/libexec/$module")" = 644 ] || fail "unsafe lifecycle module mode: $module"
     done
-    [ "$(stat -c %a "$adapter/bin/koreader-remagic")" = 755 ] || fail "wrapper mode is not 0755"
-    [ "$(stat -c %a "$adapter/share/patches/2-remagic-runtime.lua")" = 644 ] || fail "patch mode is not 0644"
+    [ "$(stat -c %a "$adapter/bin/koreader-for-remagic")" = 755 ] || fail "wrapper mode is not 0755"
+    [ "$(stat -c %a "$adapter/share/patches/21-remagic-lifecycle-v2.lua")" = 644 ] || fail "patch mode is not 0644"
     [ "$(stat -c %u:%g "$adapter")" = "$(id -u):$(id -g)" ] || fail "adapter owner is not explicit"
     [ -f "$data/clipboard/history.lua" ] || fail "allowed legacy clipboard was not migrated"
+    [ -f "$data/history/renamed.lua" ] || fail "previous project-name data was not migrated"
     [ ! -e "$data/plugins" ] || fail "legacy plugins were migrated"
     [ ! -e "$data/patches" ] || fail "legacy patches were migrated"
     [ ! -e "$data/cache" ] || fail "legacy cache was migrated"
     [ ! -e "$data/ota" ] || fail "legacy OTA state was migrated"
-    [ ! -e "$case_root/home/root/apps/.remagic-koreader.install-transaction" ] || fail "committed journal was not cleaned"
-    [ ! -e "$case_root/home/root/.local/share/remagic-koreader/.data.install-new" ] || fail "data stage was not cleaned"
-    [ ! -e "$case_root/home/root/.local/share/remagic-koreader/.data.install-old" ] || fail "data rollback tree was not cleaned"
+    [ ! -e "$case_root/home/root/apps/.koreader-for-remagic.install-transaction" ] || fail "committed journal was not cleaned"
+    [ ! -e "$case_root/home/root/.local/share/koreader-for-remagic/.data.install-new" ] || fail "data stage was not cleaned"
+    [ ! -e "$case_root/home/root/.local/share/koreader-for-remagic/.data.install-old" ] || fail "data rollback tree was not cleaned"
 }
 
 case_root=$TMPDIR_TEST/case
@@ -140,7 +149,7 @@ for mode in existing absent; do
     for stage in $stages; do
         prepare_case "$mode" "$case_root"
         tree_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
-        tree_fingerprint "$case_root/home/root/apps/koreader" "$TMPDIR_TEST/program-baseline"
+        tree_fingerprint "$case_root$VENDOR_DIR" "$TMPDIR_TEST/program-baseline"
 
         set +e
         run_installer "$case_root" env REMAGIC_INSTALL_TEST_CRASH_AT=$stage \
@@ -151,7 +160,7 @@ for mode in existing absent; do
 
         run_installer "$case_root" env REMAGIC_INSTALL_TEST_RECOVER_ONLY=1 \
             >"$TMPDIR_TEST/recover.log" 2>&1 || fail "$mode recovery failed at $stage"
-        same_fingerprint "$case_root/home/root/apps/koreader" "$TMPDIR_TEST/program-baseline"
+        same_fingerprint "$case_root$VENDOR_DIR" "$TMPDIR_TEST/program-baseline"
 
         case "$stage" in
         committed|backup_staged|backup_published|journal_retired)
@@ -171,14 +180,17 @@ done
 
 # A committed journal never discards rollback copies until the installed
 # adapter still matches the manifest written before publication.
-prepare_case existing "$case_root"
-tree_fingerprint "$case_root/home/root/apps/koreader" "$TMPDIR_TEST/program-baseline"
+prepare_case absent "$case_root"
+run_installer "$case_root" env >/dev/null
+tree_fingerprint "$case_root$VENDOR_DIR" "$TMPDIR_TEST/program-baseline"
 set +e
 run_installer "$case_root" env REMAGIC_INSTALL_TEST_CRASH_AT=committed >/dev/null 2>&1
 manifest_crash_status=$?
 set -e
 [ "$manifest_crash_status" -eq 97 ] || fail "manifest-integrity setup did not stop at committed"
-printf 'corrupted after commit\n' >"$case_root/home/root/apps/remagic-koreader/bin/koreader-remagic"
+adapter=$(find "$case_root/home/root/apps/koreader-for-remagic/adapter/releases" \
+    -mindepth 1 -maxdepth 1 -type d -name 'standalone-*' -print -quit)
+printf 'corrupted after commit\n' >"$adapter/bin/koreader-for-remagic"
 set +e
 run_installer "$case_root" env REMAGIC_INSTALL_TEST_RECOVER_ONLY=1 \
     >"$TMPDIR_TEST/checksum.log" 2>&1
@@ -186,22 +198,22 @@ checksum_status=$?
 set -e
 [ "$checksum_status" -ne 0 ] || fail "committed recovery accepted a corrupted adapter"
 grep -q 'checksum verification failed' "$TMPDIR_TEST/checksum.log" || fail "checksum refusal was not explicit"
-[ -d "$case_root/home/root/apps/.remagic-koreader.install-transaction/adapter-old" ] || \
+[ -d "$case_root/home/root/apps/.koreader-for-remagic.install-transaction/adapter-old" ] || \
     fail "checksum refusal discarded adapter rollback data"
-cp "$ROOT/scripts/koreader-remagic" "$case_root/home/root/apps/remagic-koreader/bin/koreader-remagic"
-chmod 0755 "$case_root/home/root/apps/remagic-koreader/bin/koreader-remagic"
+cp "$ROOT/scripts/koreader-for-remagic" "$adapter/bin/koreader-for-remagic"
+chmod 0755 "$adapter/bin/koreader-for-remagic"
 run_installer "$case_root" env REMAGIC_INSTALL_TEST_RECOVER_ONLY=1 >/dev/null
 assert_installed "$case_root"
-same_fingerprint "$case_root/home/root/apps/koreader" "$TMPDIR_TEST/program-baseline"
+same_fingerprint "$case_root$VENDOR_DIR" "$TMPDIR_TEST/program-baseline"
 
 # A normal install migrates through a staged data tree and leaves the upstream
 # program tree byte-for-byte unchanged.
 prepare_case absent "$case_root"
-tree_fingerprint "$case_root/home/root/apps/koreader" "$TMPDIR_TEST/program-baseline"
+tree_fingerprint "$case_root$VENDOR_DIR" "$TMPDIR_TEST/program-baseline"
 run_installer "$case_root" env >"$TMPDIR_TEST/install.log" 2>&1 || fail "normal install failed"
 assert_installed "$case_root"
-same_fingerprint "$case_root/home/root/apps/koreader" "$TMPDIR_TEST/program-baseline"
-find "$case_root/home/root/.local/state/remagic-koreader/backups" \
+same_fingerprint "$case_root$VENDOR_DIR" "$TMPDIR_TEST/program-baseline"
+find "$case_root/home/root/.local/state/koreader-for-remagic/backups" \
     -name .remagic-installer-transaction -type f | grep -q . || fail "migration backup was not preserved"
 
 # Graceful failure after publication must restore both trees immediately.
@@ -227,9 +239,9 @@ run_installer "$case_root" env \
 restored_status=$?
 set -e
 [ "$restored_status" -eq 97 ] || fail "rollback-restored crash returned $restored_status"
-[ -d "$case_root/home/root/apps/.remagic-koreader.install-transaction" ] || \
+[ -d "$case_root/home/root/apps/.koreader-for-remagic.install-transaction" ] || \
     fail "durable rollback retired its journal before the retirement barrier"
-[ ! -e "$case_root/home/root/apps/.remagic-koreader.install-garbage" ] || \
+[ ! -e "$case_root/home/root/apps/.koreader-for-remagic.install-garbage" ] || \
     fail "durable rollback published garbage before the retirement barrier"
 run_installer "$case_root" env REMAGIC_INSTALL_TEST_RECOVER_ONLY=1 >/dev/null
 same_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
@@ -246,7 +258,7 @@ run_installer "$case_root" env \
 retired_status=$?
 set -e
 [ "$retired_status" -eq 97 ] || fail "rollback-retired crash returned $retired_status"
-[ -d "$case_root/home/root/apps/.remagic-koreader.install-garbage" ] || fail "retired rollback journal was not retained"
+[ -d "$case_root/home/root/apps/.koreader-for-remagic.install-garbage" ] || fail "retired rollback journal was not retained"
 run_installer "$case_root" env REMAGIC_INSTALL_TEST_RECOVER_ONLY=1 >/dev/null
 same_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 
@@ -254,8 +266,8 @@ same_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 # discard idempotently after the read-only live-process check.
 prepare_case existing "$case_root"
 tree_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
-mkdir "$case_root/home/root/apps/.remagic-koreader.install-preparing"
-printf 'partial journal\n' >"$case_root/home/root/apps/.remagic-koreader.install-preparing/pid"
+mkdir "$case_root/home/root/apps/.koreader-for-remagic.install-preparing"
+printf 'partial journal\n' >"$case_root/home/root/apps/.koreader-for-remagic.install-preparing/pid"
 run_installer "$case_root" env REMAGIC_INSTALL_TEST_RECOVER_ONLY=1 >/dev/null
 same_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 
@@ -264,7 +276,7 @@ same_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 # table scan races or cannot yet identify the just-starting reader.
 prepare_case existing "$case_root"
 tree_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
-shared_lock=$case_root/home/root/apps/.remagic-koreader.install.lock
+shared_lock=$case_root/home/root/apps/.koreader-for-remagic.install.lock
 exec 7>>"$shared_lock"
 flock -s 7
 set +e
@@ -280,10 +292,10 @@ same_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 
 # The live-process guard runs before journal creation or any target mutation.
 prepare_case existing "$case_root"
-rm "$case_root/home/root/apps/.remagic-koreader.install.lock"
+rm "$case_root/home/root/apps/.koreader-for-remagic.install.lock"
 mkdir -p "$case_root/proc/222"
 printf '%s\000%s\000' \
-    "$case_root/home/root/apps/koreader/reader.lua" \
+    "$case_root$VENDOR_DIR/reader.lua" \
     "$case_root/home/root/books/a.epub" >"$case_root/proc/222/cmdline"
 tree_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 set +e
@@ -294,20 +306,16 @@ set -e
 grep -q 'PID: 222' "$TMPDIR_TEST/live.log" || fail "live refusal omitted PID"
 same_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 
-# A Manager bundle owns adapter/program as one release unit. The standalone
-# installer must never replace that parent tree and thereby delete its reader.
+# Existing Manager releases are immutable siblings. A standalone release must
+# be installed beside them without replacing or deleting their content.
 prepare_case existing "$case_root"
-mkdir -p "$case_root/home/root/apps/remagic-koreader/program"
-printf 'manager-owned reader\n' >"$case_root/home/root/apps/remagic-koreader/program/reader.lua"
-tree_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
-set +e
-run_installer "$case_root" env >"$TMPDIR_TEST/manager-owned.log" 2>&1
-manager_owned_status=$?
-set -e
-[ "$manager_owned_status" -ne 0 ] || fail "standalone installer replaced manager-owned program"
-grep -q 'manager-owned adapter/program' "$TMPDIR_TEST/manager-owned.log" || \
-    fail "manager-owned program refusal was not explicit"
-same_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
+manager_release=$case_root/home/root/apps/koreader-for-remagic/adapter/releases/manager-release
+mkdir -p "$manager_release"
+printf 'manager-owned adapter\n' >"$manager_release/sentinel"
+tree_fingerprint "$manager_release" "$TMPDIR_TEST/manager-release-baseline"
+run_installer "$case_root" env >/dev/null
+same_fingerprint "$manager_release" "$TMPDIR_TEST/manager-release-baseline"
+assert_installed "$case_root"
 
 # Test hooks are fail-closed unless the explicit marker and test mode agree.
 prepare_case existing "$case_root"
@@ -320,7 +328,7 @@ set -e
 grep -q 'test root is forbidden' "$TMPDIR_TEST/fail-closed.log" || fail "test-root refusal was not explicit"
 same_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 
-rm "$case_root/.remagic-koreader-installer-test-root"
+rm "$case_root/.koreader-for-remagic-installer-test-root"
 set +e
 REMAGIC_INSTALL_TEST_MODE=1 REMAGIC_INSTALL_TEST_ROOT=$case_root "$INSTALLER" \
     >"$TMPDIR_TEST/marker.log" 2>&1
@@ -332,8 +340,8 @@ same_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 # Symlink and special-file targets are rejected without following or replacing
 # them. These are separate cases because the preflight must remain read-only.
 prepare_case existing "$case_root"
-rm -rf "$case_root/home/root/apps/remagic-koreader"
-ln -s koreader "$case_root/home/root/apps/remagic-koreader"
+rm -rf "$case_root/home/root/apps/koreader-for-remagic"
+ln -s koreader "$case_root/home/root/apps/koreader-for-remagic"
 tree_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 set +e
 run_installer "$case_root" env >"$TMPDIR_TEST/symlink.log" 2>&1
@@ -343,8 +351,8 @@ set -e
 same_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 
 prepare_case existing "$case_root"
-rm -rf "$case_root/home/root/.local/share/remagic-koreader/data"
-mkfifo "$case_root/home/root/.local/share/remagic-koreader/data"
+rm -rf "$case_root/home/root/.local/share/koreader-for-remagic/data"
+mkfifo "$case_root/home/root/.local/share/koreader-for-remagic/data"
 tree_fingerprint "$case_root/home" "$TMPDIR_TEST/baseline"
 set +e
 run_installer "$case_root" env >"$TMPDIR_TEST/special.log" 2>&1

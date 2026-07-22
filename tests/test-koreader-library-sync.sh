@@ -15,7 +15,7 @@ fail() {
 KOREADER_TEST_INSTALL=${KOREADER_TEST_INSTALL:-}
 if [ -z "$KOREADER_TEST_INSTALL" ]; then
     for candidate in \
-        "$ROOT/../remagic-manager/dist/remagic-manager/opt/koreader" \
+        "$ROOT/../remagic/dist/remagic/opt/koreader-for-remagic/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader" \
         /home/root/apps/koreader
     do
         if [ -r "$candidate/common/dkjson.lua" ]; then
@@ -35,7 +35,7 @@ FLOCK=${KOREADER_TEST_FLOCK:-$(command -v flock)}
 [ -x "$FLOCK" ] || fail "flock is required"
 
 SOURCE=$TMPDIR_TEST/xochitl
-STATE_ROOT=$TMPDIR_TEST/remagic-koreader
+STATE_ROOT=$TMPDIR_TEST/koreader-for-remagic
 LIBRARY=$STATE_ROOT/library
 mkdir -p "$SOURCE/.thumbnails"
 mkdir -p "$STATE_ROOT/user-owned-sentinel"

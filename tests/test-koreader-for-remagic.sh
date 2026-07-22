@@ -2,14 +2,12 @@
 set -eu
 
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-WRAPPER=$ROOT/scripts/koreader-remagic
-MANAGER_MANIFEST=$ROOT/../remagic-manager/native/appload-runtime/apps/koreader/external.manifest.json
+WRAPPER=$ROOT/scripts/koreader-for-remagic
 ADAPTER_MANIFEST=$ROOT/manifests/koreader.toml
 TMPDIR_TEST=$(mktemp -d)
 trap 'rm -rf "$TMPDIR_TEST"' EXIT HUP INT TERM
-export KOREADER_LIFECYCLE_HELPER=$ROOT/scripts/koreader-lifecycle
 export KOREADER_PLATFORM_PATCH_DIR=$ROOT/patches
-export KOREADER_INSTALL_LOCK=$TMPDIR_TEST/remagic-koreader.install.lock
+export KOREADER_INSTALL_LOCK=$TMPDIR_TEST/koreader-for-remagic.install.lock
 export KOREADER_INSTALL_FLOCK=$(command -v flock)
 
 fail() {
@@ -45,28 +43,17 @@ do
     assert_contains "$assignment" "$WRAPPER"
 done
 
-assert_contains 'exec = "/home/root/apps/remagic-koreader/bin/koreader-remagic"' "$ADAPTER_MANIFEST"
+assert_contains 'exec = "/home/root/apps/koreader-for-remagic/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/bin/koreader-for-remagic"' "$ADAPTER_MANIFEST"
 assert_contains 'schema = 2' "$ADAPTER_MANIFEST"
 assert_contains 'display = "qtfb"' "$ADAPTER_MANIFEST"
 assert_contains 'resident = true' "$ADAPTER_MANIFEST"
-assert_contains 'KOREADER_LIFECYCLE_HELPER=' "$WRAPPER"
-assert_contains 'REMAGIC_KOREADER_LIFECYCLE_HELPER' "$WRAPPER"
-for module_variable in REMAGIC_KOREADER_ASYNC_MODULE REMAGIC_KOREADER_PROTOCOL_MODULE \
-    REMAGIC_KOREADER_OPEN_PATH_MODULE REMAGIC_KOREADER_FLOCK; do
+for module_variable in REMAGIC_KOREADER_LIBEXEC_DIR REMAGIC_KOREADER_FLOCK; do
     assert_contains "$module_variable" "$WRAPPER"
 done
 assert_contains 'KOREADER_PLATFORM_PATCH_DIR' "$WRAPPER"
+assert_contains "EXT_FONT_DIR=\$(printf '%s' \"\$KOREADER_FONT_DIRECTORIES\" | tr ':' ';')" "$WRAPPER"
 if grep -F 'KO_MULTIUSER' "$WRAPPER" "$ADAPTER_MANIFEST" >/dev/null; then
     fail "KO_MULTIUSER must not split state away from /home/root/apps/koreader"
-fi
-
-# The manager is a sibling checkout in the development workspace, but the
-# adapter's own checks must remain runnable from a standalone clone.
-if [ -f "$MANAGER_MANIFEST" ]; then
-    assert_contains '"application": "/home/root/apps/remagic-koreader/bin/koreader-remagic"' "$MANAGER_MANIFEST"
-    if grep -F '"LD_PRELOAD"' "$MANAGER_MANIFEST" >/dev/null; then
-        fail "manager manifest must not preload the shim into the wrapper"
-    fi
 fi
 
 # Lightweight behavior check with a fake reader. Using the host C library as
@@ -78,9 +65,20 @@ HOST_PRELOAD=$(ldd /bin/sh | awk '/libc\.so/{ print $3; exit }')
 KOREADER_DIR_TEST=$TMPDIR_TEST/koreader
 mkdir -p "$KOREADER_DIR_TEST"
 DATA_HOME_TEST=$TMPDIR_TEST/data-home
-mkdir -p "$DATA_HOME_TEST"
+mkdir -p "$DATA_HOME_TEST/settings"
+printf 'healthy-test-database\n' >"$DATA_HOME_TEST/settings/statistics.sqlite3"
 export KO_HOME=$DATA_HOME_TEST
 export KOREADER_DATA_DIR=$DATA_HOME_TEST
+FONT_ONE=$TMPDIR_TEST/adapter-fonts
+FONT_TWO=$TMPDIR_TEST/extra-fonts
+mkdir -p "$FONT_ONE" "$FONT_TWO"
+export REMAGIC_FONT_DIRECTORIES=$FONT_ONE:$FONT_TWO
+LIFECYCLE_CHANNEL=$TMPDIR_TEST/lifecycle.channel
+: >"$LIFECYCLE_CHANNEL"
+exec 7<>"$LIFECYCLE_CHANNEL"
+export REMAGIC_LIFECYCLE_FD=7
+export REMAGIC_APP_GENERATION=3719679425990660
+export KOREADER_LIBEXEC_DIR=$ROOT/scripts
 LIBRARY_DIR_TEST=$TMPDIR_TEST/library
 LAST_DIR_TEST=$LIBRARY_DIR_TEST/分册
 OUTSIDE_DIR_TEST=$TMPDIR_TEST/outside
@@ -124,9 +122,9 @@ printf 'run=%s oneshot=%s mode=%s model=%s input=%s full=%s grab=%s depth=%s arg
     "$QTFB_SHIM_RESPECT_FULL_REFRESH_REQUESTS" "$KO_DONT_GRAB_INPUT" \
     "$KO_DONT_SET_DEPTH" "$#" "${1-}" "$KO_HOME" "$STARDICT_DATA_DIR" \
     "${REMAGIC_INITIAL_OPEN_PATH-}" >>"$TEST_TRACE"
-printf 'async=%s protocol=%s open=%s flock=%s\n' \
-    "$REMAGIC_KOREADER_ASYNC_MODULE" "$REMAGIC_KOREADER_PROTOCOL_MODULE" \
-    "$REMAGIC_KOREADER_OPEN_PATH_MODULE" "$REMAGIC_KOREADER_FLOCK" >>"$TEST_TRACE"
+printf 'libexec=%s fonts=%s managed=%s flock=%s\n' \
+    "$REMAGIC_KOREADER_LIBEXEC_DIR" "$EXT_FONT_DIR" "$REMAGIC_MANAGED" \
+    "$REMAGIC_KOREADER_FLOCK" >>"$TEST_TRACE"
 if [ -n "${TEST_CHILD_PID_FILE:-}" ]; then
     printf '%s\n' "$$" >"$TEST_CHILD_PID_FILE"
 fi
@@ -172,20 +170,39 @@ assert_contains 'KO_HOME and KOREADER_DATA_DIR must identify the same data root'
 [ ! -e "$DATA_HOME_TEST/patches" ] || fail "data-root conflict wrote platform patches"
 [ ! -e "$CONFLICT_HOME" ] || fail "data-root conflict created KO_HOME"
 
+# A directory (or symlink-to-directory) at an authoritative patch filename
+# must never turn atomic rename into "move inside attacker directory".
+mkdir -p "$DATA_HOME_TEST/patches/10-remagic-environment.lua"
+UNSAFE_PATCH_LOG=$TMPDIR_TEST/unsafe-patch-target.log
+set +e
+TEST_STATE=$STATE TEST_TRACE=$TRACE \
+KOREADER_DIR=$KOREADER_DIR_TEST QTFB_SHIM=$HOST_PRELOAD \
+KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
+    "$WRAPPER" 2>"$UNSAFE_PATCH_LOG"
+unsafe_patch_status=$?
+set -e
+[ "$unsafe_patch_status" -ne 0 ] || fail "directory platform patch target was accepted"
+assert_contains 'KOReader platform patch target is unsafe' "$UNSAFE_PATCH_LOG"
+[ ! -e "$TRACE" ] || fail "reader.lua ran with an unsafe platform patch target"
+rmdir "$DATA_HOME_TEST/patches/10-remagic-environment.lua"
+
 TEST_STATE=$STATE TEST_TRACE=$TRACE TEST_RESTART_ONCE=1 \
 KOREADER_DIR=$KOREADER_DIR_TEST QTFB_SHIM=$HOST_PRELOAD \
 KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
-    "$WRAPPER" 2>"$WRAPPER_LOG"
+    "$WRAPPER" 2>"$WRAPPER_LOG" || {
+        cat "$WRAPPER_LOG" >&2
+        fail "wrapper failed its managed-runtime launch"
+    }
 [ "$(cat "$STATE")" -eq 2 ] || fail "exit 85 did not restart reader.lua exactly once"
 assert_contains "run=1 oneshot=1 mode=N_RGB565 model=false input=NATIVE full=1 grab=1 depth=1 argc=1 arg1=$LAST_DIR_TEST" "$TRACE"
 assert_contains "run=2 oneshot=1 mode=N_RGB565 model=false input=NATIVE full=1 grab=1 depth=1 argc=1 arg1=$LAST_DIR_TEST" "$TRACE"
 assert_contains "ko_home=$DATA_HOME_TEST" "$TRACE"
-assert_contains "async=$ROOT/scripts/remagic-lifecycle-async.lua" "$TRACE"
-assert_contains "protocol=$ROOT/scripts/remagic-lifecycle-protocol.lua" "$TRACE"
-assert_contains "open=$ROOT/scripts/remagic-open-path.lua" "$TRACE"
+assert_contains "libexec=$ROOT/scripts" "$TRACE"
+assert_contains "fonts=$FONT_ONE;$FONT_TWO" "$TRACE"
+assert_contains "managed=1" "$TRACE"
 assert_contains "flock=$KOREADER_INSTALL_FLOCK" "$TRACE"
 [ ! -e "$KOREADER_DIR_TEST/settings.reader.lua" ] || fail "isolated KO_HOME wrote settings into the program tree"
-for platform_patch in 1-remagic-storage.lua 2-remagic-runtime.lua; do
+for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
     cmp -s "$KOREADER_PLATFORM_PATCH_DIR/$platform_patch" \
         "$DATA_HOME_TEST/patches/$platform_patch" \
         || fail "isolated KO_HOME did not receive $platform_patch"
@@ -195,10 +212,28 @@ for platform_patch in 1-remagic-storage.lua 2-remagic-runtime.lua; do
         || fail "isolated $platform_patch has unsafe permissions"
 done
 assert_contains "dict=$DATA_HOME_TEST/data/dict" "$TRACE"
-assert_contains "koreader-remagic: library_dir=$LAST_DIR_TEST source=lastdir" "$WRAPPER_LOG"
+assert_contains "koreader-for-remagic: library_dir=$LAST_DIR_TEST source=lastdir" "$WRAPPER_LOG"
 [ "$(wc -l <"$LIBRARY_SYNC_TRACE")" -eq 1 ] || fail "friendly library was not synchronized once per wrapper launch"
 cmp -s "$STARTUP_SCRIPT" "$ACTIVE_STARTUP_SCRIPT" || fail "wrapper did not refresh the active startup script"
 [ "$(stat -c '%a' "$ACTIVE_STARTUP_SCRIPT")" = 755 ] || fail "active startup script is not executable"
+
+reader_runs_before=$(cat "$STATE")
+rm -f "$ACTIVE_STARTUP_SCRIPT"
+mkdir "$ACTIVE_STARTUP_SCRIPT"
+UNSAFE_STARTUP_LOG=$TMPDIR_TEST/unsafe-startup-target.log
+set +e
+TEST_STATE=$STATE TEST_TRACE=$TRACE \
+KOREADER_DIR=$KOREADER_DIR_TEST QTFB_SHIM=$HOST_PRELOAD \
+KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
+    "$WRAPPER" 2>"$UNSAFE_STARTUP_LOG"
+unsafe_startup_status=$?
+set -e
+[ "$unsafe_startup_status" -ne 0 ] || fail "directory startup target was accepted"
+assert_contains 'KOReader active startup target is unsafe' "$UNSAFE_STARTUP_LOG"
+[ "$(cat "$STATE")" = "$reader_runs_before" ] || fail "reader.lua ran with an unsafe startup target"
+rmdir "$ACTIVE_STARTUP_SCRIPT"
+printf '%s\n' '#!/bin/sh' 'echo installed-startup-v1' >"$ACTIVE_STARTUP_SCRIPT"
+chmod 0755 "$ACTIVE_STARTUP_SCRIPT"
 
 # A stale lastdir outside the document library must not reopen a broad parent;
 # an explicit library argument forces KOReader's file manager instead.
@@ -218,7 +253,7 @@ KOREADER_DIR=$KOREADER_DIR_TEST QTFB_SHIM=$HOST_PRELOAD \
 KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
     "$WRAPPER" 2>"$WRAPPER_LOG"
 assert_contains "argc=1 arg1=$LIBRARY_DIR_TEST" "$TRACE"
-assert_contains "koreader-remagic: library_dir=$LIBRARY_DIR_TEST source=fallback" "$WRAPPER_LOG"
+assert_contains "koreader-for-remagic: library_dir=$LIBRARY_DIR_TEST source=fallback" "$WRAPPER_LOG"
 [ "$(wc -l <"$LIBRARY_SYNC_TRACE")" -eq 2 ] || fail "second wrapper launch did not synchronize the friendly library"
 cmp -s "$STARTUP_SCRIPT" "$ACTIVE_STARTUP_SCRIPT" || fail "second launch left a stale active startup script"
 [ ! -L "$ACTIVE_STARTUP_SCRIPT" ] || fail "startup synchronization left an attacker-controlled symlink"
@@ -249,6 +284,7 @@ cat >"$FAILING_MIGRATOR" <<'EOF'
 exit 75
 EOF
 chmod 0755 "$FAILING_MIGRATOR"
+rm -f "$DATA_HOME_TEST/settings/statistics.sqlite3"
 rm -f "$STATE" "$TRACE"
 printf '%s\n' '#!/bin/sh' 'echo installed-startup-v3' >"$STARTUP_SCRIPT"
 printf '%s\n' '#!/bin/sh' 'echo active-before-failed-migration' >"$ACTIVE_STARTUP_SCRIPT"
@@ -265,6 +301,7 @@ set -e
 [ ! -e "$TRACE" ] || fail "reader started despite an incomplete migration"
 assert_contains 'refusing to open an incomplete data directory' "$TMPDIR_TEST/migration-failure.log"
 assert_contains 'active-before-failed-migration' "$ACTIVE_STARTUP_SCRIPT"
+printf 'healthy-test-database\n' >"$DATA_HOME_TEST/settings/statistics.sqlite3"
 
 rm -f "$STATE" "$TRACE" "$CHILD_PID_FILE"
 TEST_STATE=$STATE TEST_TRACE=$TRACE TEST_BLOCK=1 \

@@ -3,7 +3,8 @@ set -eu
 
 PROC_ROOT=${KOREADER_PROC_ROOT:-/proc}
 KOREADER_DIR=${KOREADER_DIR:-/home/root/apps/koreader}
-ADAPTER_EXEC=${KOREADER_ADAPTER_EXEC:-/home/root/apps/remagic-koreader/bin/koreader-remagic}
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+ADAPTER_EXEC=${KOREADER_ADAPTER_EXEC:-$SCRIPT_DIR/../bin/koreader-for-remagic}
 
 running_pids=
 for process_dir in "$PROC_ROOT"/[0-9]*; do
@@ -17,7 +18,7 @@ for process_dir in "$PROC_ROOT"/[0-9]*; do
 done
 
 if [ -n "$running_pids" ]; then
-    echo "KOReader is running under Remagic Manager (PID:${running_pids})." >&2
+    echo "KOReader is running under ReMagic Manager (PID:${running_pids})." >&2
     echo "Return to the manager, close KOReader, then run the installer again." >&2
     echo "The installer will not terminate a manager-owned application." >&2
     exit 1

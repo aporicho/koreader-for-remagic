@@ -47,12 +47,10 @@ with tempfile.TemporaryDirectory() as runtime:
     environment.update(
         REMAGIC_APP_PID="4321",
         REMAGIC_APP_GENERATION=str(generation),
-        REMAGIC_RUNTIME_DIR=runtime,
         REMAGIC_LIFECYCLE_FD=str(child.fileno()),
         REMAGIC_KOREADER_POLL_SECONDS="0.05",
-        REMAGIC_KOREADER_LIFECYCLE_HELPER=str(
-            Path(patch).resolve().parent.parent / "scripts" / "koreader-lifecycle"
-        ),
+        REMAGIC_KOREADER_LIBEXEC_DIR=str(Path(patch).resolve().parent.parent / "scripts"),
+        TEST_REAL_FFI="1",
     )
     try:
         result = subprocess.run(
@@ -71,9 +69,6 @@ with tempfile.TemporaryDirectory() as runtime:
 
     if result.returncode != 0:
         fail(f"LuaJIT direct-FD mock returned {result.returncode}", result)
-    if Path(runtime, "koreader-ready").exists():
-        fail("direct-FD transport created a legacy readiness marker", result)
-
 frames: list[dict[str, object]] = []
 while True:
     try:

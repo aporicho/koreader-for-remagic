@@ -1,13 +1,14 @@
 #!/bin/sh
 set -eu
 
-# Standalone transactional installer for the Remagic KOReader adapter.  This
+# Standalone transactional installer for the KOReader for ReMagic.  This
 # script deliberately does not install or modify KOReader itself.  A complete
-# KOReader tree must already exist at KOREADER_DIR (the production default is
-# /home/root/apps/koreader).
+# The official KOReader vendor tree must already exist at KOREADER_DIR. This
+# installer publishes only a content-addressed adapter release and writable
+# data; it never modifies the vendor tree.
 
 die() {
-    echo "remagic-koreader install: $*" >&2
+    echo "koreader-for-remagic install: $*" >&2
     exit 1
 }
 
@@ -55,9 +56,9 @@ case "$TEST_MODE" in
         [ -d "$PREFIX" ] && [ ! -L "$PREFIX" ] || die "test root must be a real directory"
         canonical_prefix=$(CDPATH='' cd -- "$PREFIX" && pwd -P)
         [ "$canonical_prefix" = "$PREFIX" ] || die "test root must be canonical and contain no symlink at its leaf"
-        marker=$PREFIX/.remagic-koreader-installer-test-root
+        marker=$PREFIX/.koreader-for-remagic-installer-test-root
         [ -f "$marker" ] && [ ! -L "$marker" ] || die "test root opt-in marker is missing"
-        [ "$(sed -n '1p' "$marker")" = remagic-koreader-installer-test-root-v1 ] || \
+        [ "$(sed -n '1p' "$marker")" = koreader-for-remagic-installer-test-root-v1 ] || \
             die "test root opt-in marker is invalid"
         INSTALL_UID=$(id -u)
         INSTALL_GID=$(id -g)
@@ -66,24 +67,52 @@ case "$TEST_MODE" in
 esac
 
 APPS_DIR=$PREFIX/home/root/apps
-ADAPTER_DIR=$APPS_DIR/remagic-koreader
+APP_ROOT=$APPS_DIR/koreader-for-remagic
+ADAPTER_ROOT=$APP_ROOT/adapter
+ADAPTER_RELEASES_DIR=$ADAPTER_ROOT/releases
+ADAPTER_RELEASE_HASH=$(
+    cd "$ROOT"
+    digest_input=$(mktemp /tmp/koreader-for-remagic-standalone-digest.XXXXXX) || exit 1
+    trap 'rm -f "$digest_input"' 0 HUP INT TERM
+    for release_input in \
+        scripts/koreader-for-remagic \
+        scripts/koreader-data-migrate \
+        scripts/koreader-db-inspect \
+        scripts/koreader-db-inspect.lua \
+        scripts/koreader-library-sync \
+        scripts/koreader-library-index.lua \
+        scripts/koreader-not-running \
+        scripts/remagic-lifecycle-protocol.lua \
+        scripts/remagic-open-path.lua \
+        patches/10-remagic-environment.lua \
+        patches/20-remagic-policy.lua \
+        patches/21-remagic-lifecycle-v2.lua
+    do
+        sha256sum "$release_input" >>"$digest_input" || exit 1
+    done
+    digest_line=$(sha256sum "$digest_input") || exit 1
+    printf '%s\n' "${digest_line%% *}"
+) || die "could not calculate the standalone adapter release digest"
+[ "${#ADAPTER_RELEASE_HASH}" -eq 64 ] || die "standalone adapter release digest is invalid"
+ADAPTER_RELEASE_ID=standalone-$ADAPTER_RELEASE_HASH
+ADAPTER_DIR=$ADAPTER_RELEASES_DIR/$ADAPTER_RELEASE_ID
 if [ "$TEST_MODE" -eq 0 ] && [ -n "$KOREADER_DIR_OVERRIDE" ]; then
     case "$KOREADER_DIR_OVERRIDE" in /*) ;; *) die "KOREADER_DIR must be absolute" ;; esac
     KOREADER_DIR=$KOREADER_DIR_OVERRIDE
 else
     [ -z "$KOREADER_DIR_OVERRIDE" ] || die "KOREADER_DIR override is forbidden in installer test mode"
-    KOREADER_DIR=$APPS_DIR/koreader
+    KOREADER_DIR=$APP_ROOT/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader
 fi
-DATA_PARENT=$PREFIX/home/root/.local/share/remagic-koreader
+DATA_PARENT=$PREFIX/home/root/.local/share/koreader-for-remagic
 DATA_DIR=$DATA_PARENT/data
 DATA_STAGE=$DATA_PARENT/.data.install-new
 DATA_OLD=$DATA_PARENT/.data.install-old
-STATE_PARENT=$PREFIX/home/root/.local/state/remagic-koreader
+STATE_PARENT=$PREFIX/home/root/.local/state/koreader-for-remagic
 BACKUP_ROOT=$STATE_PARENT/backups
-TXN_DIR=$APPS_DIR/.remagic-koreader.install-transaction
-TXN_PREP=$APPS_DIR/.remagic-koreader.install-preparing
-TXN_GC=$APPS_DIR/.remagic-koreader.install-garbage
-LOCK_FILE=$APPS_DIR/.remagic-koreader.install.lock
+TXN_DIR=$APPS_DIR/.koreader-for-remagic.install-transaction
+TXN_PREP=$APPS_DIR/.koreader-for-remagic.install-preparing
+TXN_GC=$APPS_DIR/.koreader-for-remagic.install-garbage
+LOCK_FILE=$APPS_DIR/.koreader-for-remagic.install.lock
 TXN_STATE=$TXN_DIR/state
 ADAPTER_STAGE=$TXN_DIR/adapter-new
 ADAPTER_OLD=$TXN_DIR/adapter-old
@@ -110,12 +139,12 @@ test_hook() {
     stage=$1
     [ "$TEST_MODE" -eq 1 ] || return 0
     if [ "${REMAGIC_INSTALL_TEST_CRASH_AT:-}" = "$stage" ]; then
-        echo "remagic-koreader install: simulated power loss at $stage" >&2
+        echo "koreader-for-remagic install: simulated power loss at $stage" >&2
         trap - EXIT HUP INT TERM
         exit 97
     fi
     if [ "${REMAGIC_INSTALL_TEST_FAIL_AT:-}" = "$stage" ]; then
-        echo "remagic-koreader install: simulated failure at $stage" >&2
+        echo "koreader-for-remagic install: simulated failure at $stage" >&2
         return 96
     fi
 }
@@ -126,29 +155,27 @@ preflight_commands_and_sources() {
     done
 
     for source_path in \
-        "$ROOT/scripts/koreader-remagic" \
+        "$ROOT/scripts/koreader-for-remagic" \
         "$ROOT/scripts/koreader-data-migrate" \
         "$ROOT/scripts/koreader-db-inspect" \
         "$ROOT/scripts/koreader-db-inspect.lua" \
         "$ROOT/scripts/koreader-library-sync" \
         "$ROOT/scripts/koreader-library-index.lua" \
         "$ROOT/scripts/koreader-not-running" \
-        "$ROOT/scripts/koreader-lifecycle" \
-        "$ROOT/scripts/remagic-lifecycle-async.lua" \
         "$ROOT/scripts/remagic-lifecycle-protocol.lua" \
         "$ROOT/scripts/remagic-open-path.lua" \
-        "$ROOT/patches/1-remagic-storage.lua" \
-        "$ROOT/patches/2-remagic-runtime.lua"
+        "$ROOT/patches/10-remagic-environment.lua" \
+        "$ROOT/patches/20-remagic-policy.lua" \
+        "$ROOT/patches/21-remagic-lifecycle-v2.lua"
     do
         require_regular_file "$source_path"
     done
     for executable_path in \
-        "$ROOT/scripts/koreader-remagic" \
+        "$ROOT/scripts/koreader-for-remagic" \
         "$ROOT/scripts/koreader-data-migrate" \
         "$ROOT/scripts/koreader-db-inspect" \
         "$ROOT/scripts/koreader-library-sync" \
-        "$ROOT/scripts/koreader-not-running" \
-        "$ROOT/scripts/koreader-lifecycle"
+        "$ROOT/scripts/koreader-not-running"
     do
         [ -x "$executable_path" ] || die "source is not executable: $executable_path"
     done
@@ -163,12 +190,10 @@ preflight_targets() {
     [ -f "$reader" ] && [ ! -L "$reader" ] && [ -x "$reader" ] || \
         die "existing KOReader reader.lua is missing, a symlink, or not executable: $reader"
 
-    if path_exists "$ADAPTER_DIR"; then
-        require_real_dir "$ADAPTER_DIR"
-        if path_exists "$ADAPTER_DIR/program"; then
-            die "manager-owned adapter/program exists; use the Remagic Manager bundle installer"
-        fi
-    fi
+    for adapter_parent in "$APP_ROOT" "$ADAPTER_ROOT" "$ADAPTER_RELEASES_DIR"; do
+        if path_exists "$adapter_parent"; then require_real_dir "$adapter_parent"; fi
+    done
+    if path_exists "$ADAPTER_DIR"; then require_real_dir "$ADAPTER_DIR"; fi
     if path_exists "$DATA_PARENT"; then
         require_real_dir "$DATA_PARENT"
     else
@@ -204,12 +229,30 @@ preflight_targets() {
     fi
 }
 
+ensure_adapter_release_parent() {
+    for adapter_parent in "$APP_ROOT" "$ADAPTER_ROOT" "$ADAPTER_RELEASES_DIR"; do
+        if path_exists "$adapter_parent"; then
+            require_real_dir "$adapter_parent"
+        else
+            mkdir "$adapter_parent"
+            chmod 0755 "$adapter_parent"
+            set_installed_owner "$adapter_parent"
+        fi
+    done
+}
+
+remove_empty_adapter_parents() {
+    rmdir "$ADAPTER_RELEASES_DIR" 2>/dev/null || true
+    rmdir "$ADAPTER_ROOT" 2>/dev/null || true
+    rmdir "$APP_ROOT" 2>/dev/null || true
+}
+
 run_not_running_check() {
     proc_root=$PREFIX/proc
     [ "$TEST_MODE" -eq 0 ] && proc_root=/proc
     KOREADER_PROC_ROOT=$proc_root \
     KOREADER_DIR=$KOREADER_DIR \
-    KOREADER_ADAPTER_EXEC=$ADAPTER_DIR/bin/koreader-remagic \
+    KOREADER_ADAPTER_EXEC=$ADAPTER_DIR/bin/koreader-for-remagic \
         "$ROOT/scripts/koreader-not-running"
 }
 
@@ -289,6 +332,7 @@ rollback_transaction() {
     restore_tree "$ADAPTER_DIR" "$ADAPTER_OLD" "$adapter_original" adapter
     remove_owned_tree "$DATA_STAGE"
     remove_owned_tree "$ADAPTER_STAGE"
+    remove_empty_adapter_parents
     # The restored trees must be durable while the replayable journal still
     # exists. Only then may recovery retire its final source of truth.
     sync_filesystems
@@ -429,31 +473,34 @@ stage_file() {
 }
 
 stage_adapter() {
-    mkdir -p "$ADAPTER_STAGE/bin" "$ADAPTER_STAGE/libexec" "$ADAPTER_STAGE/share/patches"
-    chmod 0755 "$ADAPTER_STAGE" "$ADAPTER_STAGE/bin" "$ADAPTER_STAGE/libexec" "$ADAPTER_STAGE/share" "$ADAPTER_STAGE/share/patches"
-    for directory in "$ADAPTER_STAGE" "$ADAPTER_STAGE/bin" "$ADAPTER_STAGE/libexec" "$ADAPTER_STAGE/share" "$ADAPTER_STAGE/share/patches"; do
+    mkdir -p "$ADAPTER_STAGE/bin" "$ADAPTER_STAGE/libexec" \
+        "$ADAPTER_STAGE/share/patches" "$ADAPTER_STAGE/share/fonts"
+    chmod 0755 "$ADAPTER_STAGE" "$ADAPTER_STAGE/bin" "$ADAPTER_STAGE/libexec" \
+        "$ADAPTER_STAGE/share" "$ADAPTER_STAGE/share/patches" "$ADAPTER_STAGE/share/fonts"
+    for directory in "$ADAPTER_STAGE" "$ADAPTER_STAGE/bin" "$ADAPTER_STAGE/libexec" \
+        "$ADAPTER_STAGE/share" "$ADAPTER_STAGE/share/patches" "$ADAPTER_STAGE/share/fonts"; do
         set_installed_owner "$directory"
     done
-    stage_file "$ROOT/scripts/koreader-remagic" bin/koreader-remagic 0755
+    stage_file "$ROOT/scripts/koreader-for-remagic" bin/koreader-for-remagic 0755
     stage_file "$ROOT/scripts/koreader-data-migrate" libexec/koreader-data-migrate 0755
     stage_file "$ROOT/scripts/koreader-db-inspect" libexec/koreader-db-inspect 0755
     stage_file "$ROOT/scripts/koreader-db-inspect.lua" libexec/koreader-db-inspect.lua 0644
     stage_file "$ROOT/scripts/koreader-library-sync" libexec/koreader-library-sync 0755
     stage_file "$ROOT/scripts/koreader-library-index.lua" libexec/koreader-library-index.lua 0644
     stage_file "$ROOT/scripts/koreader-not-running" libexec/koreader-not-running 0755
-    stage_file "$ROOT/scripts/koreader-lifecycle" libexec/koreader-lifecycle 0755
-    for module in remagic-lifecycle-async.lua remagic-lifecycle-protocol.lua remagic-open-path.lua; do
+    for module in remagic-lifecycle-protocol.lua remagic-open-path.lua; do
         stage_file "$ROOT/scripts/$module" "libexec/$module" 0644
     done
-    stage_file "$ROOT/patches/1-remagic-storage.lua" share/patches/1-remagic-storage.lua 0644
-    stage_file "$ROOT/patches/2-remagic-runtime.lua" share/patches/2-remagic-runtime.lua 0644
+    for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
+        stage_file "$ROOT/patches/$platform_patch" "share/patches/$platform_patch" 0644
+    done
     (
         cd "$ADAPTER_STAGE"
         find bin libexec share -type f ! -type l -print | LC_ALL=C sort | while IFS= read -r relative; do
             sha256sum "$relative"
         done
     ) >"$TXN_DIR/adapter.sha256"
-    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 13 ] || die "staged adapter manifest is incomplete"
+    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 12 ] || die "staged adapter manifest is incomplete"
     chmod 0600 "$TXN_DIR/adapter.sha256"
     set_installed_owner "$TXN_DIR/adapter.sha256"
 }
@@ -470,28 +517,29 @@ verify_installed_file() {
 
 verify_installed_adapter() {
     require_real_dir "$ADAPTER_DIR"
-    for directory in "$ADAPTER_DIR" "$ADAPTER_DIR/bin" "$ADAPTER_DIR/libexec" "$ADAPTER_DIR/share" "$ADAPTER_DIR/share/patches"; do
+    for directory in "$ADAPTER_DIR" "$ADAPTER_DIR/bin" "$ADAPTER_DIR/libexec" \
+        "$ADAPTER_DIR/share" "$ADAPTER_DIR/share/patches" "$ADAPTER_DIR/share/fonts"; do
         require_real_dir "$directory"
         [ "$(stat -c %a "$directory")" = 755 ] || die "installed adapter directory mode is wrong: $directory"
         [ "$(stat -c '%u:%g' "$directory")" = "$INSTALL_UID:$INSTALL_GID" ] || \
             die "installed adapter directory owner is wrong: $directory"
     done
-    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 13 ] || die "adapter manifest is incomplete"
+    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 12 ] || die "adapter manifest is incomplete"
     (cd "$ADAPTER_DIR" && sha256sum -c "$TXN_DIR/adapter.sha256" >/dev/null) || \
         die "installed adapter checksum verification failed"
-    verify_installed_file bin/koreader-remagic 755
+    verify_installed_file bin/koreader-for-remagic 755
     verify_installed_file libexec/koreader-data-migrate 755
     verify_installed_file libexec/koreader-db-inspect 755
     verify_installed_file libexec/koreader-db-inspect.lua 644
     verify_installed_file libexec/koreader-library-sync 755
     verify_installed_file libexec/koreader-library-index.lua 644
     verify_installed_file libexec/koreader-not-running 755
-    verify_installed_file libexec/koreader-lifecycle 755
-    for module in remagic-lifecycle-async.lua remagic-lifecycle-protocol.lua remagic-open-path.lua; do
+    for module in remagic-lifecycle-protocol.lua remagic-open-path.lua; do
         verify_installed_file "libexec/$module" 644
     done
-    verify_installed_file share/patches/1-remagic-storage.lua 644
-    verify_installed_file share/patches/2-remagic-runtime.lua 644
+    for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
+        verify_installed_file "share/patches/$platform_patch" 644
+    done
 }
 
 stage_and_migrate_data() {
@@ -509,7 +557,7 @@ stage_and_migrate_data() {
 
     write_state migration_started
     test_hook migration_started
-    legacy_dirs=$KOREADER_DIR:$PREFIX/home/root/.paperweight/services/koreader/koreader:$PREFIX/home/root/.config/koreader
+    legacy_dirs=$PREFIX/home/root/.local/share/remagic-koreader/data:$PREFIX/home/root/apps/koreader:$KOREADER_DIR:$PREFIX/home/root/.paperweight/services/koreader/koreader:$PREFIX/home/root/.config/koreader
     mkdir "$TXN_DIR/migration-backups-data"
     KOREADER_DIR=$KOREADER_DIR \
     KOREADER_DATA_DIR=$DATA_STAGE \
@@ -630,10 +678,11 @@ begin_transaction
 # Close the small check/acquire race without weakening the read-only guard that
 # already ran before the transaction directory was created.
 run_not_running_check
+ensure_adapter_release_parent
 stage_adapter
 write_state prepared
 test_hook prepared
 stage_and_migrate_data
 commit_trees
 
-echo "KOReader QTFB adapter installed transactionally; launch it through Remagic Manager."
+echo "KOReader QTFB adapter installed transactionally; wire this standalone release into a compatible manager manifest before launching."

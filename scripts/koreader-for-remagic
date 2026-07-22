@@ -1,22 +1,24 @@
 #!/bin/sh
 set -eu
 
-KOREADER_DIR=${KOREADER_DIR:-/home/root/apps/koreader}
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+ADAPTER_DIR=${REMAGIC_KOREADER_ADAPTER_DIR:-$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd -P)}
+KOREADER_DIR=${KOREADER_DIR:-/home/root/apps/koreader-for-remagic/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader}
 QTFB_SHIM=${QTFB_SHIM:-/home/root/apps/remagic/shims/qtfb-shim.so}
 KOREADER_READER=${KOREADER_READER:-$KOREADER_DIR/reader.lua}
-KOREADER_DATA_DIR=${KOREADER_DATA_DIR:-${KO_HOME:-/home/root/.local/share/remagic-koreader/data}}
-KOREADER_LIBRARY_DIR=${KOREADER_LIBRARY_DIR:-/home/root/.local/share/remagic-koreader/library}
+KOREADER_DATA_DIR=${KOREADER_DATA_DIR:-${KO_HOME:-/home/root/.local/share/koreader-for-remagic/data}}
+KOREADER_LIBRARY_DIR=${KOREADER_LIBRARY_DIR:-/home/root/.local/share/koreader-for-remagic/library}
 KOREADER_SETTINGS=${KOREADER_SETTINGS:-$KOREADER_DATA_DIR/settings.reader.lua}
-KOREADER_MIGRATOR=${KOREADER_MIGRATOR:-/home/root/apps/remagic-koreader/libexec/koreader-data-migrate}
-KOREADER_LIBRARY_SYNC=${KOREADER_LIBRARY_SYNC:-/home/root/apps/remagic-koreader/libexec/koreader-library-sync}
-KOREADER_LIFECYCLE_HELPER=${KOREADER_LIFECYCLE_HELPER:-/home/root/apps/remagic-koreader/libexec/koreader-lifecycle}
-KOREADER_ASYNC_MODULE=${KOREADER_ASYNC_MODULE:-${KOREADER_LIFECYCLE_HELPER%/*}/remagic-lifecycle-async.lua}
-KOREADER_PROTOCOL_MODULE=${KOREADER_PROTOCOL_MODULE:-${KOREADER_LIFECYCLE_HELPER%/*}/remagic-lifecycle-protocol.lua}
-KOREADER_OPEN_PATH_MODULE=${KOREADER_OPEN_PATH_MODULE:-${KOREADER_LIFECYCLE_HELPER%/*}/remagic-open-path.lua}
-KOREADER_PLATFORM_PATCH_DIR=${KOREADER_PLATFORM_PATCH_DIR:-/home/root/apps/remagic-koreader/share/patches}
+KOREADER_LIBEXEC_DIR=${KOREADER_LIBEXEC_DIR:-$ADAPTER_DIR/libexec}
+KOREADER_MIGRATOR=${KOREADER_MIGRATOR:-$KOREADER_LIBEXEC_DIR/koreader-data-migrate}
+KOREADER_LIBRARY_SYNC=${KOREADER_LIBRARY_SYNC:-$KOREADER_LIBEXEC_DIR/koreader-library-sync}
+KOREADER_PROTOCOL_MODULE=${KOREADER_PROTOCOL_MODULE:-$KOREADER_LIBEXEC_DIR/remagic-lifecycle-protocol.lua}
+KOREADER_OPEN_PATH_MODULE=${KOREADER_OPEN_PATH_MODULE:-$KOREADER_LIBEXEC_DIR/remagic-open-path.lua}
+KOREADER_PLATFORM_PATCH_DIR=${KOREADER_PLATFORM_PATCH_DIR:-$ADAPTER_DIR/share/patches}
+KOREADER_FONT_DIRECTORIES=${REMAGIC_FONT_DIRECTORIES:-${KOREADER_FONT_DIRECTORIES:-$ADAPTER_DIR/share/fonts}}
 KOREADER_STARTUP_SCRIPT=${KOREADER_STARTUP_SCRIPT:-$KOREADER_DIR/koreader.sh}
 KOREADER_ACTIVE_STARTUP_SCRIPT=${KOREADER_ACTIVE_STARTUP_SCRIPT:-/tmp/koreader.sh}
-KOREADER_INSTALL_LOCK=${KOREADER_INSTALL_LOCK:-/home/root/apps/.remagic-koreader.install.lock}
+KOREADER_INSTALL_LOCK=${KOREADER_INSTALL_LOCK:-/home/root/apps/.koreader-for-remagic.install.lock}
 KOREADER_INSTALL_FLOCK=${KOREADER_INSTALL_FLOCK:-/usr/bin/flock}
 
 # DataStorage reads KO_HOME while the adapter and migration helpers use
@@ -37,7 +39,7 @@ if [ ! -x "$KOREADER_READER" ]; then
     exit 1
 fi
 if [ ! -r "$QTFB_SHIM" ]; then
-    echo "Remagic QTFB shim missing: $QTFB_SHIM" >&2
+    echo "ReMagic QTFB shim missing: $QTFB_SHIM" >&2
     exit 1
 fi
 if [ ! -f "$KOREADER_STARTUP_SCRIPT" ] || [ ! -r "$KOREADER_STARTUP_SCRIPT" ]; then
@@ -48,11 +50,7 @@ if [ ! -x "$KOREADER_LIBRARY_SYNC" ]; then
     echo "KOReader friendly library synchronizer missing: $KOREADER_LIBRARY_SYNC" >&2
     exit 1
 fi
-if [ ! -x "$KOREADER_LIFECYCLE_HELPER" ]; then
-    echo "KOReader lifecycle adapter missing: $KOREADER_LIFECYCLE_HELPER" >&2
-    exit 1
-fi
-for lifecycle_module in "$KOREADER_ASYNC_MODULE" "$KOREADER_PROTOCOL_MODULE" "$KOREADER_OPEN_PATH_MODULE"; do
+for lifecycle_module in "$KOREADER_PROTOCOL_MODULE" "$KOREADER_OPEN_PATH_MODULE"; do
     [ -r "$lifecycle_module" ] || {
         echo "KOReader lifecycle module missing: $lifecycle_module" >&2
         exit 1
@@ -62,32 +60,61 @@ if [ ! -x "$KOREADER_INSTALL_FLOCK" ]; then
     echo "KOReader deployment lock helper missing: $KOREADER_INSTALL_FLOCK" >&2
     exit 1
 fi
-for platform_patch in 1-remagic-storage.lua 2-remagic-runtime.lua; do
+for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
     if [ ! -r "$KOREADER_PLATFORM_PATCH_DIR/$platform_patch" ]; then
         echo "KOReader platform userpatch missing: $KOREADER_PLATFORM_PATCH_DIR/$platform_patch" >&2
         exit 1
     fi
 done
 
+case ${REMAGIC_LIFECYCLE_FD:-} in
+    ''|*[!0-9]*)
+        echo "REMAGIC_LIFECYCLE_FD is required for managed KOReader" >&2
+        exit 1
+        ;;
+esac
+if [ ! -r "/proc/$$/fd/$REMAGIC_LIFECYCLE_FD" ] \
+        || [ ! -w "/proc/$$/fd/$REMAGIC_LIFECYCLE_FD" ]; then
+    echo "REMAGIC_LIFECYCLE_FD is not an inherited bidirectional descriptor" >&2
+    exit 1
+fi
+case ${REMAGIC_APP_GENERATION:-} in
+    ''|*[!0-9]*)
+        echo "REMAGIC_APP_GENERATION is required for managed KOReader" >&2
+        exit 1
+        ;;
+esac
+
+old_ifs=$IFS
+IFS=:
+font_count=0
+for font_dir in $KOREADER_FONT_DIRECTORIES; do
+    [ -n "$font_dir" ] || continue
+    [ -d "$font_dir" ] && [ ! -L "$font_dir" ] || {
+        echo "KOReader external font directory missing or unsafe: $font_dir" >&2
+        exit 1
+    }
+    font_count=$((font_count + 1))
+done
+IFS=$old_ifs
+[ "$font_count" -gt 0 ] || {
+    echo "KOReader requires at least one external font directory" >&2
+    exit 1
+}
+EXT_FONT_DIR=$(printf '%s' "$KOREADER_FONT_DIRECTORIES" | tr ':' ';')
+
 export HOME="${HOME:-/home/root}"
 export KOREADER_DIR
 export KOREADER_DATA_DIR
-# Upstream KOReader's datastorage module uses KO_HOME as its writable data
-# root while continuing to load the program and assets from KOREADER_DIR.
-# Production defaults remain byte-for-byte compatible; acceptance tests use
-# this boundary to keep settings and databases away from real reading data.
 export KO_HOME
+export EXT_FONT_DIR
 export STARDICT_DATA_DIR="${STARDICT_DATA_DIR:-$KOREADER_DATA_DIR/data/dict}"
+export REMAGIC_MANAGED="${REMAGIC_MANAGED:-1}"
 export REMAGIC_APP_ID="${REMAGIC_APP_ID:-koreader}"
-export REMAGIC_KOREADER_LIFECYCLE_HELPER="$KOREADER_LIFECYCLE_HELPER"
 export REMAGIC_KOREADER_FLOCK="${REMAGIC_KOREADER_FLOCK:-$KOREADER_INSTALL_FLOCK}"
-export REMAGIC_KOREADER_ASYNC_MODULE="$KOREADER_ASYNC_MODULE"
-export REMAGIC_KOREADER_PROTOCOL_MODULE="$KOREADER_PROTOCOL_MODULE"
-export REMAGIC_KOREADER_OPEN_PATH_MODULE="$KOREADER_OPEN_PATH_MODULE"
-export REMAGIC_ALLOWED_OPEN_ROOTS="${REMAGIC_ALLOWED_OPEN_ROOTS:-${KOREADER_ALLOWED_OPEN_ROOTS:-/home/root/.local/share/remagic-koreader/library:/home/root/books:/home/root/koreader:/home/root/.local/share/remarkable/xochitl}}"
-# The manager knows the wrapper PID only after fork.  The shebang keeps this
-# shell in that same process, so bind KOReader's userpatch markers here before
-# reader.lua is spawned.
+export REMAGIC_KOREADER_LIBEXEC_DIR="$KOREADER_LIBEXEC_DIR"
+export REMAGIC_ALLOWED_OPEN_ROOTS="${REMAGIC_ALLOWED_OPEN_ROOTS:-${KOREADER_ALLOWED_OPEN_ROOTS:-/home/root/.local/share/koreader-for-remagic/library:/home/root/books:/home/root/koreader:/home/root/.local/share/remarkable/xochitl}}"
+# Bind lifecycle identity to the wrapper process known by Manager.
 export REMAGIC_APP_PID="$$"
 
 acquire_deployment_read_lock() {
@@ -134,10 +161,6 @@ acquire_deployment_read_lock() {
 # between a process-table check and a concurrent Manager launch.
 acquire_deployment_read_lock
 
-cleanup_lifecycle() {
-    "$KOREADER_LIFECYCLE_HELPER" cleanup >/dev/null 2>&1 || true
-}
-
 # KOReader loads userpatches from DataStorage:getDataDir()/patches, not from
 # the immutable program tree when KO_HOME is redirected. Keep the authoritative
 # platform patch in the adapter and atomically mirror it into the active data
@@ -148,12 +171,21 @@ sync_one_platform_patch() (
     patch_source=$1
     patch_target=$2
     patch_dir=${patch_target%/*}
+    if [ -e "$patch_target" ] || [ -L "$patch_target" ]; then
+        [ -L "$patch_target" ] || \
+            { [ -f "$patch_target" ] && \
+              [ "$(stat -c %u "$patch_target" 2>/dev/null || echo invalid)" = \
+                  "$(id -u)" ]; } || {
+            echo "KOReader platform patch target is unsafe: $patch_target" >&2
+            exit 1
+        }
+    fi
     if [ -f "$patch_target" ] && cmp -s "$patch_source" "$patch_target"; then
         exit 0
     fi
 
     umask 077
-    patch_tmp=$(mktemp "$patch_dir/.2-remagic-runtime.XXXXXX") || {
+    patch_tmp=$(mktemp "$patch_dir/.remagic-platform-patch.XXXXXX") || {
         echo "Could not stage KOReader lifecycle userpatch in $patch_dir" >&2
         exit 1
     }
@@ -171,7 +203,7 @@ sync_one_platform_patch() (
         echo "KOReader platform userpatch verification failed" >&2
         exit 1
     }
-    mv -f "$patch_tmp" "$patch_target"
+    mv -Tf "$patch_tmp" "$patch_target"
     patch_tmp=
 )
 
@@ -182,7 +214,10 @@ sync_platform_patches() {
         return 1
     fi
     mkdir -p "$patch_dir"
-    for platform_patch in 1-remagic-storage.lua 2-remagic-runtime.lua; do
+    for legacy_patch in 1-remagic-storage.lua 2-remagic-runtime.lua; do
+        rm -f "$patch_dir/$legacy_patch"
+    done
+    for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua 21-remagic-lifecycle-v2.lua; do
         sync_one_platform_patch \
             "$KOREADER_PLATFORM_PATCH_DIR/$platform_patch" \
             "$patch_dir/$platform_patch"
@@ -190,7 +225,6 @@ sync_platform_patches() {
 }
 
 sync_platform_patches
-trap cleanup_lifecycle EXIT
 
 # A missing/empty statistics database is the broken partial-migration case seen
 # on device. Repair it before reader.lua opens it, without adding validation
@@ -223,9 +257,19 @@ sync_startup_script() (
         echo "KOReader active startup directory missing: $startup_dir" >&2
         exit 1
     fi
+    if [ -e "$KOREADER_ACTIVE_STARTUP_SCRIPT" ] || \
+       [ -L "$KOREADER_ACTIVE_STARTUP_SCRIPT" ]; then
+        [ -L "$KOREADER_ACTIVE_STARTUP_SCRIPT" ] || \
+            { [ -f "$KOREADER_ACTIVE_STARTUP_SCRIPT" ] && \
+              [ "$(stat -c %u "$KOREADER_ACTIVE_STARTUP_SCRIPT" \
+                  2>/dev/null || echo invalid)" = "$(id -u)" ]; } || {
+            echo "KOReader active startup target is unsafe: $KOREADER_ACTIVE_STARTUP_SCRIPT" >&2
+            exit 1
+        }
+    fi
 
     umask 077
-    startup_tmp=$(mktemp "$startup_dir/.koreader-remagic.XXXXXX") || {
+    startup_tmp=$(mktemp "$startup_dir/.koreader-for-remagic.XXXXXX") || {
         echo "Could not create temporary KOReader startup script in $startup_dir" >&2
         exit 1
     }
@@ -247,7 +291,7 @@ sync_startup_script() (
         echo "KOReader startup script copy verification failed" >&2
         exit 1
     fi
-    mv -f "$startup_tmp" "$KOREADER_ACTIVE_STARTUP_SCRIPT"
+    mv -Tf "$startup_tmp" "$KOREADER_ACTIVE_STARTUP_SCRIPT"
     startup_tmp=
 )
 
@@ -278,7 +322,7 @@ select_library_dir() {
     if [ -n "$lastdir" ] && [ -d "$lastdir" ]; then
         case "$lastdir/" in
             "$KOREADER_LIBRARY_DIR/"|"$KOREADER_LIBRARY_DIR/"*)
-                echo "koreader-remagic: library_dir=$lastdir source=lastdir" >&2
+                echo "koreader-for-remagic: library_dir=$lastdir source=lastdir" >&2
                 printf '%s\n' "$lastdir"
                 return
                 ;;
@@ -286,7 +330,7 @@ select_library_dir() {
     fi
 
     if [ -d "$KOREADER_LIBRARY_DIR" ]; then
-        echo "koreader-remagic: library_dir=$KOREADER_LIBRARY_DIR source=fallback" >&2
+        echo "koreader-for-remagic: library_dir=$KOREADER_LIBRARY_DIR source=fallback" >&2
         printf '%s\n' "$KOREADER_LIBRARY_DIR"
         return
     fi
