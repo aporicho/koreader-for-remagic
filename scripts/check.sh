@@ -11,7 +11,9 @@ sh -n scripts/koreader-data-migrate
 sh -n scripts/koreader-db-inspect
 sh -n scripts/koreader-library-sync
 sh -n scripts/koreader-not-running
+sh -n scripts/koreader-sync-state
 lua -e 'assert(loadfile("scripts/koreader-library-index.lua"))'
+lua -e 'assert(loadfile("scripts/koreader-sync-state.lua"))'
 lua -e 'assert(loadfile("patches/10-remagic-environment.lua"))'
 lua -e 'assert(loadfile("patches/20-remagic-policy.lua"))'
 lua -e 'assert(loadfile("patches/21-remagic-lifecycle-v2.lua"))'

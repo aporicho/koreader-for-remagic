@@ -54,7 +54,7 @@ manifest = tomllib.loads((root / "manifest.toml").read_text(encoding="utf-8"))
 assert bundle["app_id"] == manifest["id"] == "koreader"
 assert bundle["schema"] == 1
 assert bundle["package"] == manifest["package"] == "koreader-for-remagic"
-assert bundle["version"] == manifest["version"] == "2026.3.0-remagic.4"
+assert bundle["version"] == manifest["version"] == "2026.3.0-remagic.5"
 assert bundle["manifest_path"] == "manifest.toml"
 assert len(bundle["content_id"]) == 64
 int(bundle["content_id"], 16)
@@ -63,7 +63,7 @@ assert manifest["name"] == "KOReader"
 assert manifest["package"] == "koreader-for-remagic"
 assert manifest["supported_devices"] == ["paper_pro", "paper_pro_move"]
 assert manifest["supported_os"] == []
-assert manifest["required_remagic_api"] == 2
+assert manifest["required_remagic_api"] == 5
 assert manifest["uninstall_policy"] == "keep_data"
 assert "__REMAGIC_" not in (root / "manifest.toml").read_text(encoding="utf-8")
 release_root = "/home/root/apps/koreader/current/"
@@ -118,6 +118,8 @@ assert len(adapter_releases) == 1
 assert adapter_releases[0].name.startswith("adapter-")
 assert (adapter_releases[0] / "bin" / "koreader-for-remagic").is_file()
 assert (adapter_releases[0] / "libexec" / "remagic-library-collection.lua").is_file()
+assert (adapter_releases[0] / "libexec" / "koreader-sync-state").is_file()
+assert (adapter_releases[0] / "libexec" / "koreader-sync-state.lua").is_file()
 assert (adapter_releases[0] / "share" / "patches" / "22-remagic-library-collection.lua").is_file()
 PY
 

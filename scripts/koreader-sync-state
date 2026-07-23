@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+
+operation=${1-}
+exchange_file=${2-}
+KOREADER_DIR=${KOREADER_DIR:?KOREADER_DIR is required}
+KOREADER_LIBEXEC_DIR=${KOREADER_LIBEXEC_DIR:?KOREADER_LIBEXEC_DIR is required}
+KOREADER_DATA_DIR=${KOREADER_DATA_DIR:?KOREADER_DATA_DIR is required}
+KOREADER_BOOKS_DIR=${KOREADER_BOOKS_DIR:?KOREADER_BOOKS_DIR is required}
+
+case "$operation" in
+    export|import) ;;
+    *) echo "usage: koreader-sync-state export|import EXCHANGE_FILE" >&2; exit 64 ;;
+esac
+case "$exchange_file" in
+    /*) ;;
+    *) echo "exchange file must be absolute" >&2; exit 64 ;;
+esac
+[ -x "$KOREADER_DIR/luajit" ] || {
+    echo "KOReader LuaJIT is unavailable" >&2
+    exit 69
+}
+[ -f "$KOREADER_LIBEXEC_DIR/koreader-sync-state.lua" ] || {
+    echo "KOReader sync implementation is unavailable" >&2
+    exit 69
+}
+
+cd "$KOREADER_DIR"
+export KOREADER_DATA_DIR KOREADER_BOOKS_DIR
+exec "$KOREADER_DIR/luajit" \
+    "$KOREADER_LIBEXEC_DIR/koreader-sync-state.lua" \
+    "$operation" "$exchange_file"

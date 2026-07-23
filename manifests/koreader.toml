@@ -2,12 +2,12 @@ schema = 2
 id = "koreader"
 name = "KOReader"
 description = "由 ReMagic 托管的 Paper Pro 与 Paper Pro Move 电子书阅读器"
-version = "2026.3.0-remagic.4"
+version = "2026.3.0-remagic.5"
 kind = "user"
 package = "koreader-for-remagic"
 supported_devices = ["paper_pro", "paper_pro_move"]
 supported_os = []
-required_remagic_api = 2
+required_remagic_api = 5
 uninstall_policy = "keep_data"
 exec = "/home/root/apps/koreader/current/payload/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/bin/koreader-for-remagic"
 working_dir = "/home/root/apps/koreader/current/payload/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader"
@@ -44,6 +44,13 @@ backup_paths = [
 ]
 backup_timeout_ms = 120000
 migration_timeout_ms = 120000
+
+[sync_provider]
+schema = 1
+exporter = "/home/root/apps/koreader/current/payload/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/libexec/koreader-sync-state"
+importer = "/home/root/apps/koreader/current/payload/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/libexec/koreader-sync-state"
+data_kinds = ["reading_progress", "bookmarks"]
+timeout_ms = 30000
 
 [runtime]
 profile = "qtfb_compat"

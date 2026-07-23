@@ -15,12 +15,12 @@ manifest = tomllib.loads(path.read_text(encoding="utf-8"))
 assert manifest["schema"] == 2
 assert manifest["id"] == "koreader"
 assert manifest["name"] == "KOReader"
-assert manifest["version"] == "2026.3.0-remagic.4"
+assert manifest["version"] == "2026.3.0-remagic.5"
 assert manifest["kind"] == "user"
 assert manifest["package"] == "koreader-for-remagic"
 assert manifest["supported_devices"] == ["paper_pro", "paper_pro_move"]
 assert manifest["supported_os"] == []
-assert manifest["required_remagic_api"] == 2
+assert manifest["required_remagic_api"] == 5
 assert manifest["uninstall_policy"] == "keep_data"
 assert manifest["resident"] is True
 assert manifest["display"] == "qtfb"
@@ -52,6 +52,12 @@ assert data_schema["backup_paths"] == [
     "/home/root/.local/share/remagic-koreader/data",
     "/home/root/.local/share/koreader-for-remagic/data",
 ]
+sync_provider = manifest["sync_provider"]
+assert sync_provider["schema"] == 1
+assert sync_provider["exporter"].endswith("/koreader-sync-state")
+assert sync_provider["importer"].endswith("/koreader-sync-state")
+assert sync_provider["data_kinds"] == ["reading_progress", "bookmarks"]
+assert sync_provider["timeout_ms"] == 30_000
 
 runtime = manifest["runtime"]
 assert runtime["profile"] == "qtfb_compat"
@@ -86,6 +92,8 @@ adapter_placeholder = "__REMAGIC_ADAPTER_RELEASE__"
 for field in (
     manifest["exec"],
     manifest["data_schema"]["migrator"],
+    manifest["sync_provider"]["exporter"],
+    manifest["sync_provider"]["importer"],
     manifest["environment"]["KOREADER_LIBEXEC_DIR"],
     *runtime["fonts"]["directories"],
 ):
@@ -95,6 +103,8 @@ for field in (
     manifest["exec"],
     manifest["working_dir"],
     manifest["data_schema"]["migrator"],
+    manifest["sync_provider"]["exporter"],
+    manifest["sync_provider"]["importer"],
     manifest["environment"]["KOREADER_DIR"],
     manifest["environment"]["KOREADER_LIBEXEC_DIR"],
     *runtime["fonts"]["directories"],

@@ -4,7 +4,7 @@ set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 KOREADER_VERSION=v2026.03
 KOREADER_ARCHIVE_SHA256=56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468
-APP_VERSION=2026.3.0-remagic.4
+APP_VERSION=2026.3.0-remagic.5
 
 fail() {
     echo "build-store-package: $*" >&2
@@ -74,12 +74,13 @@ stage_file() {
 }
 
 stage_file "$ROOT/scripts/koreader-for-remagic" bin/koreader-for-remagic 0755
-for executable in koreader-data-migrate koreader-db-inspect koreader-library-sync koreader-not-running; do
+for executable in koreader-data-migrate koreader-db-inspect koreader-library-sync koreader-not-running koreader-sync-state; do
     stage_file "$ROOT/scripts/$executable" "libexec/$executable" 0755
 done
 for module in \
     koreader-db-inspect.lua \
     koreader-library-index.lua \
+    koreader-sync-state.lua \
     remagic-library-collection.lua \
     remagic-lifecycle-protocol.lua \
     remagic-open-path.lua

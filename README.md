@@ -47,7 +47,7 @@ ReMagic 构建时校验官方压缩包和完整文件清单，并把 vendor 作�
 包级 release 由内容 ID 寻址，运行 manifest 则统一经由
 `/home/root/apps/koreader/current` 原子链接进入当前只读 release。生产 manifest
 不得留下适配器占位符。
-该 manifest 声明 `paper_pro`/`paper_pro_move`、ReMagic API v2 和
+该 manifest 声明 `paper_pro`/`paper_pro_move`、ReMagic API v5 和
 `keep_data` 卸载策略。`supported_os = []` 表示继承已安装 ReMagic 系统的
 OS 兼容门槛，应用不自行猜测或放宽系统版本。
 
@@ -99,6 +99,12 @@ PDF，不修改、移动或删除 xochitl 文件。无参数冷启动进入 KORe
 集合，该集合连接友好书库与 `/home/root/books`；空的历史目录不会遮住已有书籍。
 集合显示友好中文书名，但保持官方 UUID 文件身份以延续阅读进度。`read 书名` 可以
 通过 `open_path` 在同一个驻留 PID 中直接开书，不经过集合首页。
+
+## 双机阅读状态
+
+适配层通过 manifest 的 `sync_provider` 向 ReMagic 提供离线导入和导出钩子。
+ReMagic 只会在 KOReader 完整保存并退出后调用它们；钩子使用上游 `DocSettings`
+接口同步最后阅读位置和普通书签，并保留高亮、笔记、排版设置与统计数据库。
 
 ## 字体
 

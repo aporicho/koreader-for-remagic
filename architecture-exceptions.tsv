@@ -1,3 +1,3 @@
 # kind<TAB>exact path<TAB>maximum lines<TAB>why keeping this responsibility together is clearer
-file	scripts/install-device.sh	700	The standalone transaction state machine keeps journal validation, rollback, power-loss recovery, content-addressed publication, and commit ordering together so audits can verify one fail-closed control flow.
+file	scripts/install-device.sh	720	The standalone transaction state machine keeps journal validation, rollback, power-loss recovery, content-addressed publication, provider inventory, and commit ordering together so audits can verify one fail-closed control flow.
 file	scripts/koreader-data-migrate	560	Database selection, recursive legacy merge, locking, backup, and write-boundary checks stay in the executable migrator so standalone and Manager installs cannot omit a security-critical sourced helper.
