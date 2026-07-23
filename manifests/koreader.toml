@@ -2,7 +2,7 @@ schema = 2
 id = "koreader"
 name = "KOReader"
 description = "由 ReMagic 托管的 Paper Pro 与 Paper Pro Move 电子书阅读器"
-version = "2026.3.0-remagic.6"
+version = "2026.3.0-remagic.7"
 kind = "user"
 package = "koreader-for-remagic"
 supported_devices = ["paper_pro", "paper_pro_move"]
@@ -28,7 +28,7 @@ allowed_open_roots = [
 
 [readiness]
 mode = "first_frame"
-timeout_ms = 20000
+timeout_ms = 60000
 
 [shutdown]
 graceful_timeout_ms = 3500

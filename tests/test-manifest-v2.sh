@@ -15,7 +15,7 @@ manifest = tomllib.loads(path.read_text(encoding="utf-8"))
 assert manifest["schema"] == 2
 assert manifest["id"] == "koreader"
 assert manifest["name"] == "KOReader"
-assert manifest["version"] == "2026.3.0-remagic.6"
+assert manifest["version"] == "2026.3.0-remagic.7"
 assert manifest["kind"] == "user"
 assert manifest["package"] == "koreader-for-remagic"
 assert manifest["supported_devices"] == ["paper_pro", "paper_pro_move"]
@@ -37,7 +37,7 @@ assert manifest["allowed_open_roots"] == [
     "/home/root/.local/share/remarkable/xochitl",
 ]
 
-assert manifest["readiness"] == {"mode": "first_frame", "timeout_ms": 20_000}
+assert manifest["readiness"] == {"mode": "first_frame", "timeout_ms": 60_000}
 assert manifest["shutdown"] == {
     "graceful_timeout_ms": 3_500,
     "term_timeout_ms": 4_500,

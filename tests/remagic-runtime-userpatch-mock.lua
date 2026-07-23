@@ -207,11 +207,9 @@ elseif mode == "rapid_transition" then
     show_filemanager()
     ReaderUI:doShowReader("book")
     run_paint()
-    if has_event("ready") then fail("superseded UI emitted ready") end
-    run_paint()
     if not outgoing:match('"event":"ready".-"ui":"reader"')
             and not outgoing:match('"ui":"reader".-"event":"ready"') then
-        fail("reader did not emit ready after rapid transition")
+        fail("bootstrap readiness did not follow the visible reader")
     end
 elseif mode == "background_resume" then
     ready(show_filemanager)

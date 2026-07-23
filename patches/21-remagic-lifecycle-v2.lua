@@ -153,6 +153,7 @@ end
 
 local ready_serial = 0
 local next_ready_reason = "initial"
+local bootstrap_ready_pending = true
 local function schedule_ready(kind, widget, reason)
     if not widget then return false end
     ready_serial = ready_serial + 1
@@ -179,17 +180,48 @@ local function pack_values(...) return { n = select("#", ...), ... } end
 local original_show_files = FileManager.showFiles
 FileManager.showFiles = function(self, ...)
     local results = pack_values(original_show_files(self, ...))
-    schedule_ready("filemanager", FileManager.instance)
+    if not bootstrap_ready_pending then
+        schedule_ready("filemanager", FileManager.instance)
+    end
     return unpack_values(results, 1, results.n)
 end
 local original_show_reader = ReaderUI.doShowReader
 ReaderUI.doShowReader = function(self, ...)
     local results = pack_values(original_show_reader(self, ...))
-    schedule_ready("reader", ReaderUI.instance)
+    if not bootstrap_ready_pending then
+        schedule_ready("reader", ReaderUI.instance)
+    end
     return unpack_values(results, 1, results.n)
 end
 local initial_kind, initial_widget = active_ui()
-if initial_widget then schedule_ready(initial_kind, initial_widget, "initial") end
+if initial_widget then
+    bootstrap_ready_pending = false
+    schedule_ready(initial_kind, initial_widget, "initial")
+else
+    -- When KOReader starts with a document path, ReaderUI:showReader is already
+    -- on the stack while user patches are loaded. In that path our doShowReader
+    -- wrapper cannot observe the initial transition. Arm readiness before the
+    -- first painted frame and inspect the UI that actually became visible.
+    local function probe_bootstrap_ready()
+        local scheduled = pcall(UIManager.tickAfterNext, UIManager, function()
+            if not bootstrap_ready_pending then return end
+            local kind, widget = active_ui()
+            if not kind or not widget then
+                probe_bootstrap_ready()
+                return
+            end
+            bootstrap_ready_pending = false
+            next_ready_reason = nil
+            emit_event("ready", { ui = kind, reason = "initial" })
+            log("info", "semantic-ready", "ui=" .. kind .. " reason=initial")
+        end)
+        if not scheduled then
+            bootstrap_ready_pending = false
+            emit_event("failed", { operation = "ready", reason = "schedule_failed" })
+        end
+    end
+    probe_bootstrap_ready()
+end
 
 local shutdown_dispatched = false
 local shutdown_waiting = false
