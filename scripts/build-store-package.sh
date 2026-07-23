@@ -259,9 +259,9 @@ manifest = tomllib.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
 assert bundle["app_id"] == manifest["id"] == "koreader"
 assert bundle["version"] == manifest["version"]
 assert manifest["supported_devices"] == ["paper_pro", "paper_pro_move"]
-assert manifest["required_remagic_api"] == 2
+assert manifest["required_remagic_api"] == 5
 assert manifest["uninstall_policy"] == "keep_data"
-release_root = "/home/root/apps/koreader/current/"
+release_root = "/home/root/apps/koreader-for-remagic/"
 assert manifest["exec"].startswith(release_root)
 assert manifest["working_dir"].startswith(release_root)
 PY
