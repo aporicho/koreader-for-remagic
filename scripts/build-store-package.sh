@@ -4,7 +4,7 @@ set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 KOREADER_VERSION=v2026.03
 KOREADER_ARCHIVE_SHA256=56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468
-APP_VERSION=2026.3.0-remagic.5
+APP_VERSION=2026.3.0-remagic.6
 
 fail() {
     echo "build-store-package: $*" >&2
@@ -261,7 +261,7 @@ assert bundle["version"] == manifest["version"]
 assert manifest["supported_devices"] == ["paper_pro", "paper_pro_move"]
 assert manifest["required_remagic_api"] == 5
 assert manifest["uninstall_policy"] == "keep_data"
-release_root = "/home/root/apps/koreader-for-remagic/"
+release_root = "/home/root/apps/koreader/current/payload/"
 assert manifest["exec"].startswith(release_root)
 assert manifest["working_dir"].startswith(release_root)
 PY

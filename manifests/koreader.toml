@@ -2,15 +2,15 @@ schema = 2
 id = "koreader"
 name = "KOReader"
 description = "由 ReMagic 托管的 Paper Pro 与 Paper Pro Move 电子书阅读器"
-version = "2026.3.0-remagic.5"
+version = "2026.3.0-remagic.6"
 kind = "user"
 package = "koreader-for-remagic"
 supported_devices = ["paper_pro", "paper_pro_move"]
 supported_os = []
 required_remagic_api = 5
 uninstall_policy = "keep_data"
-exec = "/home/root/apps/koreader-for-remagic/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/bin/koreader-for-remagic"
-working_dir = "/home/root/apps/koreader-for-remagic/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader"
+exec = "/home/root/apps/koreader/current/payload/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/bin/koreader-for-remagic"
+working_dir = "/home/root/apps/koreader/current/payload/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader"
 display = "qtfb"
 resident = true
 capabilities = [
@@ -37,7 +37,7 @@ kill_timeout_ms = 5500
 
 [data_schema]
 version = 2
-migrator = "/home/root/apps/koreader-for-remagic/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/libexec/koreader-data-migrate"
+migrator = "/home/root/apps/koreader/current/payload/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/libexec/koreader-data-migrate"
 backup_paths = [
   "/home/root/.local/share/remagic-koreader/data",
   "/home/root/.local/share/koreader-for-remagic/data",
@@ -47,8 +47,8 @@ migration_timeout_ms = 120000
 
 [sync_provider]
 schema = 1
-exporter = "/home/root/apps/koreader-for-remagic/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/libexec/koreader-sync-state"
-importer = "/home/root/apps/koreader-for-remagic/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/libexec/koreader-sync-state"
+exporter = "/home/root/apps/koreader/current/payload/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/libexec/koreader-sync-state"
+importer = "/home/root/apps/koreader/current/payload/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/libexec/koreader-sync-state"
 data_kinds = ["reading_progress", "bookmarks"]
 timeout_ms = 30000
 
@@ -72,7 +72,7 @@ lang = "C.UTF-8"
 name = "Asia/Shanghai"
 
 [runtime.fonts]
-directories = ["/home/root/apps/koreader-for-remagic/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/share/fonts"]
+directories = ["/home/root/apps/koreader/current/payload/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/share/fonts"]
 
 [runtime.certificates]
 required = false
@@ -81,8 +81,8 @@ required = false
 mode = "outbound"
 
 [environment]
-KOREADER_DIR = "/home/root/apps/koreader-for-remagic/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader"
-KOREADER_LIBEXEC_DIR = "/home/root/apps/koreader-for-remagic/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/libexec"
+KOREADER_DIR = "/home/root/apps/koreader/current/payload/vendor/releases/v2026.03-56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468/koreader"
+KOREADER_LIBEXEC_DIR = "/home/root/apps/koreader/current/payload/adapter/releases/__REMAGIC_ADAPTER_RELEASE__/libexec"
 KO_HOME = "/home/root/.local/share/koreader-for-remagic/data"
 KOREADER_DATA_DIR = "/home/root/.local/share/koreader-for-remagic/data"
 KOREADER_SETTINGS = "/home/root/.local/share/koreader-for-remagic/data/settings.reader.lua"
