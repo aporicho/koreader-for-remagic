@@ -1,0 +1,73 @@
+name: Release KOReader for ReMagic
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  KOREADER_URL: https://github.com/koreader/koreader/releases/download/v2026.03/koreader-remarkable-aarch64-v2026.03.zip
+  KOREADER_SHA256: 56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468
+  FONT_SEED_SHA256: 33a38d55ff89b911390077e7f3bd8d0e76befc19c15f3b4761f5a51980175aae
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lua5.1 libarchive-tools
+      - name: Check source and release identity
+        run: |
+          scripts/check.sh
+          version=$(sed -n 's/^APP_VERSION=//p' scripts/build-store-package.sh | head -n 1)
+          test "$GITHUB_REF_NAME" = "v$version"
+      - name: Fetch verified upstream KOReader
+        run: |
+          curl --fail --location --retry 5 --output "$RUNNER_TEMP/koreader.zip" "$KOREADER_URL"
+          echo "$KOREADER_SHA256  $RUNNER_TEMP/koreader.zip" | sha256sum -c -
+      - name: Restore pinned custom fonts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/font-seed" "$RUNNER_TEMP/font-package"
+          gh release download v2026.3.0-remagic.6 --repo aporicho/koreader-for-remagic \
+            --pattern koreader-2026.3.0-remagic.6-universal-aarch64.tar.gz \
+            --dir "$RUNNER_TEMP/font-seed"
+          seed="$RUNNER_TEMP/font-seed/koreader-2026.3.0-remagic.6-universal-aarch64.tar.gz"
+          echo "$FONT_SEED_SHA256  $seed" | sha256sum -c -
+          tar -xzf "$seed" -C "$RUNNER_TEMP/font-package"
+          fonts=$(find "$RUNNER_TEMP/font-package/payload/adapter/releases" \
+            -type d -path '*/share/fonts' -print -quit)
+          test -n "$fonts"
+          echo "KOREADER_FONT_SEED_DIR=$fonts" >> "$GITHUB_ENV"
+      - name: Build deterministic Store package
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          KOREADER_DONGGUAN_REGULAR_FONT="$KOREADER_FONT_SEED_DIR/STDongGuanTi-Regular.ttf" \
+          KOREADER_DONGGUAN_BOLD_FONT="$KOREADER_FONT_SEED_DIR/STDongGuanTi-Bold.ttf" \
+          KOREADER_DONGGUAN_LIGHT_FONT="$KOREADER_FONT_SEED_DIR/STDongGuanTi-Light.ttf" \
+          KOREADER_YASONG_FONT="$KOREADER_FONT_SEED_DIR/FZPingXianYaSong.ttf" \
+            scripts/build-store-package.sh "$RUNNER_TEMP/koreader.zip" \
+            "$RUNNER_TEMP/koreader-$version-universal-aarch64.tar.gz"
+      - name: Publish package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          asset="$RUNNER_TEMP/koreader-$version-universal-aarch64.tar.gz"
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
+              --title "KOReader $version" --generate-notes
+          fi
+          gh release upload "$GITHUB_REF_NAME" "$asset" --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
