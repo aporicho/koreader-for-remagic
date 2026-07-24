@@ -92,7 +92,10 @@ local function write_atomic(path, value)
 end
 
 local function export_state()
-    local records, seen = {}, {}
+    -- LuaJSON otherwise serializes an empty table as {}, while the ReMagic
+    -- reading-state contract requires books to remain an array even when this
+    -- device has never opened a book.
+    local records, seen = json.util.InitArray({}), {}
     walk(books_root, records, seen)
     walk(data_root .. "/docsettings", records, seen)
     walk(data_root .. "/hashdocsettings", records, seen)

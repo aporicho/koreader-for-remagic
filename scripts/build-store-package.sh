@@ -4,7 +4,7 @@ set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd -P)
 KOREADER_VERSION=v2026.03
 KOREADER_ARCHIVE_SHA256=56621d5ee66ad94f4f3e2e6d204e8c34be730343f915edc36bb076a043a2e468
-APP_VERSION=2026.3.0-remagic.7
+APP_VERSION=2026.3.0-remagic.8
 
 fail() {
     echo "build-store-package: $*" >&2

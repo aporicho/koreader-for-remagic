@@ -107,6 +107,8 @@ PDF，不修改、移动或删除 xochitl 文件。无参数冷启动进入 KORe
 适配层通过 manifest 的 `sync_provider` 向 ReMagic 提供离线导入和导出钩子。
 ReMagic 只会在 KOReader 完整保存并退出后调用它们；钩子使用上游 `DocSettings`
 接口同步最后阅读位置和普通书签，并保留高亮、笔记、排版设置与统计数据库。
+空阅读历史也固定导出为 `"books": []`，不会因 Lua 空表被编码为对象而阻断
+Paper Pro 与 Paper Pro Move 的首次同步。
 
 ## 字体
 
