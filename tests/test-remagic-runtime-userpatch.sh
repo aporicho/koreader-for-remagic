@@ -51,18 +51,29 @@ assert(version:getLastLogLine() == "second")
 LUA
 [ -s "$storage_data/version.log" ] || fail "version log was not redirected into KO_HOME"
 
+REMAGIC_MANAGED=1 KOREADER_ACTIVE_STARTUP_SCRIPT=/managed/runtime/koreader.sh \
 lua - "$POLICY_PATCH" <<'LUA'
 local patch = arg[1]
 local Device = { hasOTAUpdates = function() return true end, hasOTARunning = function() return true end }
 local settings = { plugins_disabled = { statistics = true } }
 package.preload.device = function() return Device end
 package.preload.logger = function() return { info = function() end } end
+package.preload["ffi/MD5"] = function()
+    return {
+        sumFile = function(path)
+            if path == "/managed/runtime/koreader.sh" or path == "koreader.sh" then
+                return "same-managed-script"
+            end
+        end,
+    }
+end
 G_reader_settings = {
     readSetting = function(_, key) return settings[key] end,
     saveSetting = function(_, key, value) settings[key] = value end,
 }
 dofile(patch)
 assert(Device:hasOTAUpdates() == false and Device:hasOTARunning() == false)
+assert(Device:isStartupScriptUpToDate() == true)
 assert(settings.plugins_disabled.terminal == true)
 assert(settings.plugins_disabled.statistics == true)
 LUA

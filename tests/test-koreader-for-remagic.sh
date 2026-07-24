@@ -247,7 +247,8 @@ assert_contains "flock=$KOREADER_INSTALL_FLOCK" "$TRACE"
 assert_contains "device_profile=$PAPER_PRO_PROFILE" "$TRACE"
 assert_contains "collection=全部书籍 source_library=$SOURCE_LIBRARY_TEST library_index=$TMPDIR_TEST/library.index" "$TRACE"
 [ ! -e "$KOREADER_DIR_TEST/settings.reader.lua" ] || fail "isolated KO_HOME wrote settings into the program tree"
-for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua \
+for platform_patch in 10-remagic-environment.lua 20-remagic-collection-migration.lua \
+        20-remagic-policy.lua \
         21-remagic-lifecycle-v2.lua 22-remagic-library-collection.lua; do
     cmp -s "$KOREADER_PLATFORM_PATCH_DIR/$platform_patch" \
         "$DATA_HOME_TEST/patches/$platform_patch" \

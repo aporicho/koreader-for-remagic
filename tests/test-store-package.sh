@@ -54,7 +54,7 @@ manifest = tomllib.loads((root / "manifest.toml").read_text(encoding="utf-8"))
 assert bundle["app_id"] == manifest["id"] == "koreader"
 assert bundle["schema"] == 1
 assert bundle["package"] == manifest["package"] == "koreader-for-remagic"
-assert bundle["version"] == manifest["version"] == "2026.3.0-remagic.8"
+assert bundle["version"] == manifest["version"] == "2026.3.0-remagic.9"
 assert bundle["manifest_path"] == "manifest.toml"
 assert len(bundle["content_id"]) == 64
 int(bundle["content_id"], 16)
@@ -118,9 +118,12 @@ assert len(adapter_releases) == 1
 assert adapter_releases[0].name.startswith("adapter-")
 assert (adapter_releases[0] / "bin" / "koreader-for-remagic").is_file()
 assert (adapter_releases[0] / "libexec" / "remagic-library-collection.lua").is_file()
+assert (adapter_releases[0] / "libexec" / "remagic-library-collection-migrate.lua").is_file()
+assert (adapter_releases[0] / "libexec" / "remagic-library-local-scan.lua").is_file()
 assert (adapter_releases[0] / "libexec" / "koreader-sync-state").is_file()
 assert (adapter_releases[0] / "libexec" / "koreader-sync-state.lua").is_file()
 assert (adapter_releases[0] / "share" / "patches" / "22-remagic-library-collection.lua").is_file()
+assert (adapter_releases[0] / "share" / "patches" / "20-remagic-collection-migration.lua").is_file()
 PY
 
 echo "KOReader Store package tests passed"

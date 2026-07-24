@@ -15,10 +15,13 @@ sh -n scripts/koreader-sync-state
 lua -e 'assert(loadfile("scripts/koreader-library-index.lua"))'
 lua -e 'assert(loadfile("scripts/koreader-sync-state.lua"))'
 lua -e 'assert(loadfile("patches/10-remagic-environment.lua"))'
+lua -e 'assert(loadfile("patches/20-remagic-collection-migration.lua"))'
 lua -e 'assert(loadfile("patches/20-remagic-policy.lua"))'
 lua -e 'assert(loadfile("patches/21-remagic-lifecycle-v2.lua"))'
 lua -e 'assert(loadfile("patches/22-remagic-library-collection.lua"))'
 lua -e 'assert(loadfile("scripts/remagic-library-collection.lua"))'
+lua -e 'assert(loadfile("scripts/remagic-library-collection-migrate.lua"))'
+lua -e 'assert(loadfile("scripts/remagic-library-local-scan.lua"))'
 lua -e 'assert(loadfile("scripts/remagic-lifecycle-protocol.lua"))'
 lua -e 'assert(loadfile("scripts/remagic-open-path.lua"))'
 bash -n scripts/stage-custom-fonts.sh

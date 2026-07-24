@@ -69,7 +69,8 @@ if [ ! -x "$KOREADER_INSTALL_FLOCK" ]; then
     echo "KOReader deployment lock helper missing: $KOREADER_INSTALL_FLOCK" >&2
     exit 1
 fi
-for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua \
+for platform_patch in 10-remagic-environment.lua 20-remagic-collection-migration.lua \
+        20-remagic-policy.lua \
         21-remagic-lifecycle-v2.lua 22-remagic-library-collection.lua; do
     if [ ! -r "$KOREADER_PLATFORM_PATCH_DIR/$platform_patch" ]; then
         echo "KOReader platform userpatch missing: $KOREADER_PLATFORM_PATCH_DIR/$platform_patch" >&2
@@ -150,6 +151,7 @@ export KOREADER_LIBRARY_STATE_ROOT
 export KOREADER_LIBRARY_DIR
 export KOREADER_LIBRARY_INDEX
 export KOREADER_COLLECTION_NAME
+export KOREADER_ACTIVE_STARTUP_SCRIPT
 export EXT_FONT_DIR
 export STARDICT_DATA_DIR="${STARDICT_DATA_DIR:-$KOREADER_DATA_DIR/data/dict}"
 export REMAGIC_MANAGED="${REMAGIC_MANAGED:-1}"
@@ -264,7 +266,8 @@ sync_platform_patches() {
             15-remagic-library-collection.lua; do
         rm -f "$patch_dir/$legacy_patch"
     done
-    for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua \
+    for platform_patch in 10-remagic-environment.lua 20-remagic-collection-migration.lua \
+            20-remagic-policy.lua \
             21-remagic-lifecycle-v2.lua 22-remagic-library-collection.lua; do
         sync_one_platform_patch \
             "$KOREADER_PLATFORM_PATCH_DIR/$platform_patch" \

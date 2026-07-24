@@ -1,6 +1,7 @@
 local module_path = assert(arg[1])
-local mode = assert(arg[2])
-local root = assert(arg[3])
+local local_scan_module_path = assert(arg[2])
+local mode = assert(arg[3])
+local root = assert(arg[4])
 
 local function fail(message) error("FAIL: " .. message, 0) end
 local function equal(actual, expected, message)
@@ -49,6 +50,16 @@ if mode == "existing" then
         collate = "access",
         folders = { [root .. "/custom"] = { subfolders = false, scan_on_show = false } },
     }
+elseif mode == "invalid_index" then
+    ReadCollection.coll[collection_name] = {
+        [official_one] = { file = official_one, text = uuid_one .. ".epub" },
+        [official_missing] = { file = official_missing, text = uuid_missing .. ".epub" },
+    }
+    ReadCollection.coll_settings[collection_name] = {
+        order = 2,
+        collate = "natural",
+        remagic_collection_version = 2,
+    }
 end
 function ReadCollection:addCollection(name)
     self.coll[name] = {}
@@ -78,17 +89,26 @@ function ReadCollection:updateCollectionFromFolder(name)
 end
 
 local collection_open_count = 0
+local collection_refresh_count = 0
 local last_collection_items
 local collection_ui = {}
+local function snapshot_collection()
+    last_collection_items = {}
+    for file, item in pairs(ReadCollection.coll[collection_name]) do
+        last_collection_items[file] = item.text
+    end
+end
 function collection_ui:onShowColl(name)
     equal(name, collection_name, "opened collection")
     ReadCollection:updateCollectionFromFolder(name, nil, true)
+    self.booklist_menu = { path = name }
     collection_open_count = collection_open_count + 1
-    last_collection_items = {}
-    for file, item in pairs(ReadCollection.coll[name]) do
-        last_collection_items[file] = item.text
-    end
+    snapshot_collection()
     return true
+end
+function collection_ui:updateItemTable()
+    collection_refresh_count = collection_refresh_count + 1
+    snapshot_collection()
 end
 
 local FileManager = {
@@ -164,13 +184,55 @@ function ReaderUI:showFileManager(file)
     return "file-manager", nil, 5
 end
 
-local UIManager = { shown = {} }
+local UIManager = { shown = {}, scheduled = {} }
 function UIManager:show(widget) self.shown[#self.shown + 1] = widget end
+function UIManager:scheduleIn(delay, callback)
+    self.scheduled[#self.scheduled + 1] = { delay = delay, callback = callback }
+end
+local function drain_scheduled()
+    local count = 0
+    while #UIManager.scheduled > 0 do
+        count = count + 1
+        if count > 100 then fail("scheduled collection scan did not terminate") end
+        local task = table.remove(UIManager.scheduled, 1)
+        task.callback()
+    end
+end
 local InfoMessage = {}
 function InfoMessage:new(options) return options end
 local ffiUtil = { realpath = function(path) return path end }
+local lfs = {}
+function lfs.attributes(path)
+    if path == books_dir or path == library_dir or path == source_dir then
+        return { mode = "directory", size = 0 }
+    end
+    local handle = io.open(path, "rb")
+    if not handle then return nil end
+    local size = handle:seek("end") or 0
+    handle:close()
+    return { mode = "file", size = size, access = 0, modification = 0 }
+end
+lfs.symlinkattributes = lfs.attributes
+function lfs.dir(path)
+    local entries
+    if path == books_dir then
+        entries = { ".", "..", "论语.epub" }
+    else
+        entries = { ".", ".." }
+    end
+    local index = 0
+    return function()
+        index = index + 1
+        return entries[index]
+    end, {}
+end
+local DocumentRegistry = {}
+function DocumentRegistry:hasProvider(path)
+    return path:match("%.epub$") ~= nil or path:match("%.pdf$") ~= nil
+end
 
 local install = assert(dofile(module_path))
+local new_local_scan = assert(dofile(local_scan_module_path))
 local state = install({
     FileManager = FileManager,
     FileManagerCollection = FileManagerCollection,
@@ -178,8 +240,11 @@ local state = install({
     ReadCollection = ReadCollection,
     ReaderUI = ReaderUI,
     UIManager = UIManager,
+    DocumentRegistry = DocumentRegistry,
     ffiUtil = ffiUtil,
+    lfs = lfs,
     logger = logger,
+    new_local_scan = new_local_scan,
     collection_name = collection_name,
     library_dir = library_dir,
     books_dir = books_dir,
@@ -190,16 +255,12 @@ local state = install({
 
 equal(state.collection_name, collection_name, "managed collection name")
 local settings = ReadCollection.coll_settings[collection_name]
-equal(settings.folders[library_dir].subfolders, false, "official recursion")
-equal(settings.folders[library_dir].scan_on_show, false, "official scan-on-show")
-equal(settings.folders[books_dir].subfolders, true, "local recursion")
-equal(settings.folders[books_dir].scan_on_show, false, "local scan-on-show")
-equal(settings.remagic_collection_version, 1, "collection schema")
+equal(settings.folders, nil, "managed collection has no synchronous folder scan")
+equal(settings.remagic_collection_version, 2, "collection schema")
 
 if mode == "existing" then
     equal(settings.order, 7, "existing collection order")
     equal(settings.collate, "access", "existing collection sort")
-    if not settings.folders[root .. "/custom"] then fail("custom folder was overwritten") end
     if not ReadCollection.coll[collection_name][root .. "/custom.epub"] then
         fail("custom collection item was overwritten")
     end
@@ -213,6 +274,7 @@ equal(second, nil, "FileManager return 2")
 equal(third, 3, "FileManager return 3")
 if mode == "explicit" then
     equal(collection_open_count, 0, "explicit path bypasses collection")
+    drain_scheduled()
     print("collection mock passed: " .. mode)
     return
 end
@@ -224,9 +286,15 @@ if mode == "invalid_index" then
     then
         fail("invalid index removed an official collection entry")
     end
+    drain_scheduled()
     print("collection mock passed: " .. mode)
     return
 end
+if last_collection_items[local_one] then
+    fail("local library scan blocked the first collection frame")
+end
+drain_scheduled()
+equal(collection_refresh_count, 1, "local scan refresh count")
 equal(last_collection_items[official_one], "论语（官方）.epub", "official collision label")
 equal(last_collection_items[local_one], "论语（本地）.epub", "local collision label")
 equal(last_collection_items[official_two], "孟子.epub", "friendly official name")

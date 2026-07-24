@@ -11,8 +11,11 @@ local function install(options)
     local ReadCollection = assert(options.ReadCollection)
     local ReaderUI = assert(options.ReaderUI)
     local UIManager = assert(options.UIManager)
+    local DocumentRegistry = assert(options.DocumentRegistry)
     local ffiUtil = assert(options.ffiUtil)
+    local lfs = assert(options.lfs)
     local logger = assert(options.logger)
+    local new_local_scan = assert(options.new_local_scan)
 
     local collection_name = assert(options.collection_name)
     local library_dir = assert(options.library_dir)
@@ -44,6 +47,8 @@ local function install(options)
     library_dir = normalize_root(library_dir)
     books_dir = normalize_root(books_dir)
     source_dir = normalize_root(canonical(source_dir))
+    local library_root = normalize_root(canonical(library_dir))
+    local books_root = normalize_root(canonical(books_dir))
 
     local function is_within(path, root)
         path = canonical(path)
@@ -52,7 +57,7 @@ local function install(options)
     end
 
     local function is_read_only_library_path(path)
-        return is_within(path, source_dir) or is_within(path, canonical(library_dir))
+        return is_within(path, source_dir) or is_within(path, library_root)
     end
 
     local function basename(path)
@@ -126,7 +131,7 @@ local function install(options)
                     -- is available again.
                     text = item.text or basename(file)
                 end
-            elseif is_within(file, canonical(books_dir)) then
+            elseif is_within(file, books_root) then
                 text = basename(file)
                 source = "本地"
             else
@@ -147,23 +152,6 @@ local function install(options)
         return removed
     end
 
-    local function managed_folder(settings, path, subfolders, source)
-        settings.folders = type(settings.folders) == "table" and settings.folders or {}
-        local folder = settings.folders[path]
-        local changed = false
-        local added = false
-        if type(folder) ~= "table" then
-            folder = {}
-            settings.folders[path] = folder
-            changed = true
-            added = true
-        end
-        if folder.subfolders ~= subfolders then folder.subfolders = subfolders; changed = true end
-        if folder.scan_on_show ~= false then folder.scan_on_show = false; changed = true end
-        if folder.remagic_source ~= source then folder.remagic_source = source; changed = true end
-        return changed, added
-    end
-
     local function ensure_collection()
         local created = false
         if type(ReadCollection.coll[collection_name]) ~= "table" then
@@ -177,37 +165,92 @@ local function install(options)
             created = true
         end
 
-        local changed, library_added = managed_folder(settings, library_dir, false, "remarkable")
-        local books_changed, books_added = managed_folder(settings, books_dir, true, "local")
-        changed = books_changed or changed
+        local changed = false
+        -- This collection is an adapter-owned projection. Never connect a
+        -- folder through KOReader's native collection settings: ReadCollection
+        -- scans those folders synchronously while the module is being loaded.
+        if settings.folders ~= nil then settings.folders = nil; changed = true end
         if created and settings.collate == nil then settings.collate = "natural"; changed = true end
-        if settings.remagic_collection_version ~= 1 then
-            settings.remagic_collection_version = 1
+        if settings.remagic_collection_version ~= 2 then
+            settings.remagic_collection_version = 2
             changed = true
         end
         if created or changed then
-            ReadCollection:write({ [collection_name] = true })
             log("info", created and "collection-created" or "collection-updated")
         end
-        return created or library_added or books_added
+        return created or changed
     end
 
-    local initial_scan_required = ensure_collection()
+    local function add_item(path, attr)
+        local collection = ReadCollection.coll[collection_name]
+        path = canonical(path)
+        if not path or collection[path] then return false end
+        attr = attr or lfs.attributes(path)
+        if not attr or attr.mode ~= "file" then return false end
+        collection[path] = {
+            file = path,
+            text = basename(path),
+            order = nil,
+            attr = attr,
+        }
+        return true
+    end
 
-    local original_update = ReadCollection.updateCollectionFromFolder
-    ReadCollection.updateCollectionFromFolder = function(self, name, ...)
-        local count = original_update(self, name, ...)
-        if name == collection_name then
-            local removed = decorate_collection()
-            if count > 0 or removed then self:write({ [collection_name] = true }) end
+    local function sync_official_items()
+        local collection = ReadCollection.coll[collection_name]
+        local mapping, index_valid = read_friendly_index()
+        if not index_valid then return false end
+
+        local changed = false
+        local desired = {}
+        for path in pairs(mapping) do
+            local attr = lfs.attributes(path)
+            if attr and attr.mode == "file" then
+                desired[path] = true
+                changed = add_item(path, attr) or changed
+            end
         end
-        return count
+
+        for key, item in pairs(collection) do
+            local path = canonical(item.file or key)
+            if is_within(path, source_dir) and not desired[path] then
+                collection[key] = nil
+                changed = true
+            end
+        end
+        changed = decorate_collection() or changed
+        return changed
     end
-    if initial_scan_required then
-        ReadCollection:updateCollectionFromFolder(collection_name)
-    elseif decorate_collection() then
+
+    local collection_changed = ensure_collection()
+    collection_changed = sync_official_items() or collection_changed
+    if collection_changed then
         ReadCollection:write({ [collection_name] = true })
     end
+
+    local function refresh_open_collection()
+        local manager = FileManager.instance
+        local collections = manager and manager.collections
+        local menu = collections and collections.booklist_menu
+        if not menu or menu.path ~= collection_name then return end
+        local ok, err = pcall(collections.updateItemTable, collections)
+        if not ok then log("warn", "refresh-failed error=" .. tostring(err)) end
+    end
+
+    local start_local_scan = new_local_scan({
+        UIManager = UIManager,
+        DocumentRegistry = DocumentRegistry,
+        lfs = lfs,
+        books_root = books_root,
+        canonical = canonical,
+        is_within = is_within,
+        get_collection = function() return ReadCollection.coll[collection_name] end,
+        add_item = add_item,
+        decorate = decorate_collection,
+        write = function() ReadCollection:write({ [collection_name] = true }) end,
+        refresh = refresh_open_collection,
+        log = log,
+    })
 
     local function show_read_only(path)
         log("warn", "official-library-read-only path=" .. tostring(path))
@@ -313,7 +356,7 @@ local function install(options)
         if friendly_by_source[file] then
             return library_dir .. "/" .. friendly_by_source[file]
         end
-        if is_within(file, canonical(books_dir)) then return file end
+        if is_within(file, books_root) then return file end
         return nil
     end
 
@@ -326,6 +369,8 @@ local function install(options)
         open_collection()
         return unpack_values(results, 1, results.n)
     end
+
+    start_local_scan()
 
     return {
         collection_name = collection_name,

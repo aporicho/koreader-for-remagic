@@ -7,6 +7,7 @@ local logger = require("logger")
 local support_dir = assert(os.getenv("REMAGIC_KOREADER_LIBEXEC_DIR"),
     "REMAGIC_KOREADER_LIBEXEC_DIR is required")
 local install = assert(dofile(support_dir .. "/remagic-library-collection.lua"))
+local new_local_scan = assert(dofile(support_dir .. "/remagic-library-local-scan.lua"))
 
 local ok, err = pcall(install, {
     FileManager = require("apps/filemanager/filemanager"),
@@ -15,8 +16,11 @@ local ok, err = pcall(install, {
     ReadCollection = require("readcollection"),
     ReaderUI = require("apps/reader/readerui"),
     UIManager = require("ui/uimanager"),
+    DocumentRegistry = require("document/documentregistry"),
     ffiUtil = require("ffi/util"),
+    lfs = require("libs/libkoreader-lfs"),
     logger = logger,
+    new_local_scan = new_local_scan,
     collection_name = os.getenv("KOREADER_COLLECTION_NAME") or "全部书籍",
     library_dir = os.getenv("KOREADER_LIBRARY_DIR")
         or "/home/root/.local/share/koreader-for-remagic/library",

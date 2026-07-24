@@ -122,7 +122,8 @@ assert_installed() {
     [ -x "$adapter/bin/koreader-for-remagic" ] || fail "adapter wrapper was not installed"
     [ -x "$adapter/libexec/koreader-data-migrate" ] || fail "migrator was not installed"
     [ -d "$adapter/share/fonts" ] || fail "adapter font asset directory was not installed"
-    for patch in 10-remagic-environment.lua 20-remagic-policy.lua \
+    for patch in 10-remagic-environment.lua 20-remagic-collection-migration.lua \
+            20-remagic-policy.lua \
             21-remagic-lifecycle-v2.lua 22-remagic-library-collection.lua; do
         [ -f "$adapter/share/patches/$patch" ] || fail "platform patch was not installed: $patch"
     done
@@ -158,7 +159,10 @@ for mode in existing absent; do
             >"$TMPDIR_TEST/crash.log" 2>&1
         crash_status=$?
         set -e
-        [ "$crash_status" -eq 97 ] || fail "$mode crash at $stage returned $crash_status"
+        if [ "$crash_status" -ne 97 ]; then
+            cat "$TMPDIR_TEST/crash.log" >&2 || true
+            fail "$mode crash at $stage returned $crash_status"
+        fi
 
         run_installer "$case_root" env REMAGIC_INSTALL_TEST_RECOVER_ONLY=1 \
             >"$TMPDIR_TEST/recover.log" 2>&1 || fail "$mode recovery failed at $stage"

@@ -81,13 +81,16 @@ ADAPTER_RELEASE_HASH=$(
         scripts/koreader-db-inspect.lua \
         scripts/koreader-library-sync \
         scripts/koreader-library-index.lua \
+        scripts/remagic-library-collection-migrate.lua \
         scripts/remagic-library-collection.lua \
+        scripts/remagic-library-local-scan.lua \
         scripts/koreader-not-running \
         scripts/koreader-sync-state \
         scripts/koreader-sync-state.lua \
         scripts/remagic-lifecycle-protocol.lua \
         scripts/remagic-open-path.lua \
         patches/10-remagic-environment.lua \
+        patches/20-remagic-collection-migration.lua \
         patches/20-remagic-policy.lua \
         patches/21-remagic-lifecycle-v2.lua \
         patches/22-remagic-library-collection.lua
@@ -165,13 +168,16 @@ preflight_commands_and_sources() {
         "$ROOT/scripts/koreader-db-inspect.lua" \
         "$ROOT/scripts/koreader-library-sync" \
         "$ROOT/scripts/koreader-library-index.lua" \
+        "$ROOT/scripts/remagic-library-collection-migrate.lua" \
         "$ROOT/scripts/remagic-library-collection.lua" \
+        "$ROOT/scripts/remagic-library-local-scan.lua" \
         "$ROOT/scripts/koreader-not-running" \
         "$ROOT/scripts/koreader-sync-state" \
         "$ROOT/scripts/koreader-sync-state.lua" \
         "$ROOT/scripts/remagic-lifecycle-protocol.lua" \
         "$ROOT/scripts/remagic-open-path.lua" \
         "$ROOT/patches/10-remagic-environment.lua" \
+        "$ROOT/patches/20-remagic-collection-migration.lua" \
         "$ROOT/patches/20-remagic-policy.lua" \
         "$ROOT/patches/21-remagic-lifecycle-v2.lua" \
         "$ROOT/patches/22-remagic-library-collection.lua"
@@ -488,10 +494,13 @@ stage_adapter() {
     stage_file "$ROOT/scripts/koreader-not-running" libexec/koreader-not-running 0755
     stage_file "$ROOT/scripts/koreader-sync-state" libexec/koreader-sync-state 0755
     stage_file "$ROOT/scripts/koreader-sync-state.lua" libexec/koreader-sync-state.lua 0644
-    for module in remagic-library-collection.lua remagic-lifecycle-protocol.lua remagic-open-path.lua; do
+    for module in remagic-library-collection-migrate.lua remagic-library-collection.lua \
+            remagic-library-local-scan.lua \
+            remagic-lifecycle-protocol.lua remagic-open-path.lua; do
         stage_file "$ROOT/scripts/$module" "libexec/$module" 0644
     done
-    for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua \
+    for platform_patch in 10-remagic-environment.lua 20-remagic-collection-migration.lua \
+            20-remagic-policy.lua \
             21-remagic-lifecycle-v2.lua 22-remagic-library-collection.lua; do
         stage_file "$ROOT/patches/$platform_patch" "share/patches/$platform_patch" 0644
     done
@@ -501,7 +510,7 @@ stage_adapter() {
             sha256sum "$relative"
         done
     ) >"$TXN_DIR/adapter.sha256"
-    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 16 ] || die "staged adapter manifest is incomplete"
+    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 19 ] || die "staged adapter manifest is incomplete"
     chmod 0600 "$TXN_DIR/adapter.sha256"
     set_installed_owner "$TXN_DIR/adapter.sha256"
 }
@@ -525,7 +534,7 @@ verify_installed_adapter() {
         [ "$(stat -c '%u:%g' "$directory")" = "$INSTALL_UID:$INSTALL_GID" ] || \
             die "installed adapter directory owner is wrong: $directory"
     done
-    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 16 ] || die "adapter manifest is incomplete"
+    [ "$(wc -l <"$TXN_DIR/adapter.sha256")" -eq 19 ] || die "adapter manifest is incomplete"
     (cd "$ADAPTER_DIR" && sha256sum -c "$TXN_DIR/adapter.sha256" >/dev/null) || \
         die "installed adapter checksum verification failed"
     verify_installed_file bin/koreader-for-remagic 755
@@ -537,10 +546,13 @@ verify_installed_adapter() {
     verify_installed_file libexec/koreader-not-running 755
     verify_installed_file libexec/koreader-sync-state 755
     verify_installed_file libexec/koreader-sync-state.lua 644
-    for module in remagic-library-collection.lua remagic-lifecycle-protocol.lua remagic-open-path.lua; do
+    for module in remagic-library-collection-migrate.lua remagic-library-collection.lua \
+            remagic-library-local-scan.lua \
+            remagic-lifecycle-protocol.lua remagic-open-path.lua; do
         verify_installed_file "libexec/$module" 644
     done
-    for platform_patch in 10-remagic-environment.lua 20-remagic-policy.lua \
+    for platform_patch in 10-remagic-environment.lua 20-remagic-collection-migration.lua \
+            20-remagic-policy.lua \
             21-remagic-lifecycle-v2.lua 22-remagic-library-collection.lua; do
         verify_installed_file "share/patches/$platform_patch" 644
     done

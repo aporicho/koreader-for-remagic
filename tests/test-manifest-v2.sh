@@ -15,7 +15,7 @@ manifest = tomllib.loads(path.read_text(encoding="utf-8"))
 assert manifest["schema"] == 2
 assert manifest["id"] == "koreader"
 assert manifest["name"] == "KOReader"
-assert manifest["version"] == "2026.3.0-remagic.8"
+assert manifest["version"] == "2026.3.0-remagic.9"
 assert manifest["kind"] == "user"
 assert manifest["package"] == "koreader-for-remagic"
 assert manifest["supported_devices"] == ["paper_pro", "paper_pro_move"]
