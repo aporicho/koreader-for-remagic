@@ -35,6 +35,7 @@ for assignment in \
     'QTFB_SHIM_ONESHOT=1' \
     'QTFB_SHIM_MODEL=false' \
     'QTFB_SHIM_INPUT_MODE=NATIVE' \
+    'QTFB_SHIM_INPUT_PATH_NULL=' \
     'QTFB_SHIM_MODE=N_RGB565' \
     'QTFB_SHIM_RESPECT_FULL_REFRESH_REQUESTS=1' \
     'KO_DONT_GRAB_INPUT=1' \
@@ -142,6 +143,7 @@ printf 'libexec=%s fonts=%s managed=%s flock=%s\n' \
     "$REMAGIC_KOREADER_LIBEXEC_DIR" "$EXT_FONT_DIR" "$REMAGIC_MANAGED" \
     "$REMAGIC_KOREADER_FLOCK" >>"$TEST_TRACE"
 printf 'device_profile=%s\n' "$REMAGIC_DEVICE_PROFILE" >>"$TEST_TRACE"
+printf 'qtfb_null_input=%s\n' "${QTFB_SHIM_INPUT_PATH_NULL-}" >>"$TEST_TRACE"
 printf 'collection=%s source_library=%s library_index=%s\n' \
     "$KOREADER_COLLECTION_NAME" "$KOREADER_SOURCE_LIBRARY_DIR" \
     "$KOREADER_LIBRARY_INDEX" >>"$TEST_TRACE"
@@ -245,6 +247,8 @@ assert_contains "fonts=$FONT_ONE;$FONT_TWO" "$TRACE"
 assert_contains "managed=1" "$TRACE"
 assert_contains "flock=$KOREADER_INSTALL_FLOCK" "$TRACE"
 assert_contains "device_profile=$PAPER_PRO_PROFILE" "$TRACE"
+assert_contains "qtfb_null_input=/dev/input/event0,/dev/input/event1,/dev/input/event4" "$TRACE"
+assert_contains "/dev/input/event31" "$TRACE"
 assert_contains "collection=全部书籍 source_library=$SOURCE_LIBRARY_TEST library_index=$TMPDIR_TEST/library.index" "$TRACE"
 [ ! -e "$KOREADER_DIR_TEST/settings.reader.lua" ] || fail "isolated KO_HOME wrote settings into the program tree"
 for platform_patch in 10-remagic-environment.lua 20-remagic-collection-migration.lua \
