@@ -27,6 +27,59 @@ local supported_extensions = {
     cbr = true,
     txt = true,
 }
+local document_setting_fields = {
+    "font_face",
+    "font_family_fonts",
+    "css",
+    "style_tweaks",
+    "copt_font_size",
+    "copt_line_spacing",
+    "copt_word_spacing",
+    "copt_word_expansion",
+    "copt_h_page_margins",
+    "copt_t_page_margin",
+    "copt_b_page_margin",
+    "copt_sync_t_b_page_margins",
+    "copt_font_base_weight",
+    "copt_font_hinting",
+    "copt_font_kerning",
+    "copt_font_gamma",
+    "copt_embedded_fonts",
+    "copt_embedded_css",
+    "copt_block_rendering_mode",
+    "copt_page_scroll",
+    "copt_rotation_mode",
+    "copt_visible_pages",
+    "copt_smooth_scaling",
+    "copt_nightmode_images",
+    "copt_render_dpi",
+    "copt_writing_direction",
+    "kopt_font_size",
+    "kopt_text_wrap",
+    "kopt_line_spacing",
+    "kopt_word_spacing",
+    "kopt_page_margin",
+    "kopt_trim_page",
+    "kopt_zoom_factor",
+    "kopt_zoom_mode_genus",
+    "kopt_zoom_mode_type",
+    "kopt_zoom_direction",
+    "kopt_zoom_range_number",
+    "kopt_zoom_overlap_h",
+    "kopt_zoom_overlap_v",
+    "kopt_contrast",
+    "kopt_quality",
+    "kopt_page_opt",
+    "kopt_rotation_mode",
+    "kopt_page_scroll",
+    "kopt_page_gap_height",
+    "kopt_doc_language",
+    "kopt_forced_ocr",
+    "kopt_max_columns",
+    "kopt_justification",
+    "kopt_writing_direction",
+    "kopt_auto_straighten",
+}
 
 local function direct_child(root, path)
     if type(root) ~= "string" or root == "" then
@@ -91,6 +144,52 @@ local function bookmark_key(item)
         .. tostring(item.notes or "")
 end
 
+local function copy_json_value(value, depth)
+    if depth > 4 then return nil end
+    local value_type = type(value)
+    if value_type == "string" then
+        if #value <= 65536 then return value end
+    elseif value_type == "number" then
+        if value == value and value > -1000000000 and value < 1000000000 then return value end
+    elseif value_type == "boolean" then
+        return value
+    elseif value_type == "table" then
+        local copy, count = {}, 0
+        for key, child in pairs(value) do
+            local key_type = type(key)
+            if key_type ~= "string" and (key_type ~= "number" or key < 1 or key > 10000 or key % 1 ~= 0) then
+                return nil
+            end
+            local child_copy = copy_json_value(child, depth + 1)
+            if child_copy ~= nil then
+                copy[key] = child_copy
+            end
+            count = count + 1
+            if count > 512 then return nil end
+        end
+        return copy
+    end
+    return nil
+end
+
+local function copy_document_settings(record, stored)
+    for _, field in ipairs(document_setting_fields) do
+        local value = copy_json_value(stored[field], 0)
+        if value ~= nil then
+            record[field] = value
+        end
+    end
+end
+
+local function save_document_settings(settings, record)
+    for _, field in ipairs(document_setting_fields) do
+        local value = copy_json_value(record[field], 0)
+        if value ~= nil then
+            settings:saveSetting(field, value)
+        end
+    end
+end
+
 local function record_from_file(path)
     local ok, stored = pcall(dofile, path)
     if not ok or type(stored) ~= "table" or not is_book_path(stored.doc_path)
@@ -98,16 +197,16 @@ local function record_from_file(path)
         return nil
     end
     local attributes = lfs.attributes(path)
-    return {
+    local record = {
         path = stored.doc_path,
         updated_at = attributes and attributes.modification or 0,
         last_xpointer = type(stored.last_xpointer) == "string" and stored.last_xpointer or nil,
         last_page = type(stored.last_page) == "number" and stored.last_page or nil,
         percent_finished = type(stored.percent_finished) == "number" and stored.percent_finished or nil,
-        copt_font_size = type(stored.copt_font_size) == "number" and stored.copt_font_size or nil,
-        kopt_font_size = type(stored.kopt_font_size) == "number" and stored.kopt_font_size or nil,
         bookmarks = copy_bookmarks(stored.annotations),
     }
+    copy_document_settings(record, stored)
+    return record
 end
 
 local function walk(root, records, seen)
@@ -176,12 +275,7 @@ local function import_state()
             if safe_number(record.percent_finished, 0, 1) then
                 settings:saveSetting("percent_finished", record.percent_finished)
             end
-            if safe_number(record.copt_font_size, 1, 200) then
-                settings:saveSetting("copt_font_size", record.copt_font_size)
-            end
-            if safe_number(record.kopt_font_size, 0.1, 20) then
-                settings:saveSetting("kopt_font_size", record.kopt_font_size)
-            end
+            save_document_settings(settings, record)
 
             local annotations = settings:readSetting("annotations") or {}
             local preserved, seen = {}, {}

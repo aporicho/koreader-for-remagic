@@ -64,10 +64,12 @@ fi
 assert_contains 'local supported_extensions = {' "$SYNC_STATE"
 assert_contains 'relative:find("/", 1, true)' "$SYNC_STATE"
 assert_contains 'has_supported_extension(child)' "$SYNC_STATE"
-assert_contains 'copt_font_size = type(stored.copt_font_size) == "number" and stored.copt_font_size or nil' "$SYNC_STATE"
-assert_contains 'settings:saveSetting("copt_font_size", record.copt_font_size)' "$SYNC_STATE"
-assert_contains 'kopt_font_size = type(stored.kopt_font_size) == "number" and stored.kopt_font_size or nil' "$SYNC_STATE"
-assert_contains 'settings:saveSetting("kopt_font_size", record.kopt_font_size)' "$SYNC_STATE"
+assert_contains 'local document_setting_fields = {' "$SYNC_STATE"
+assert_contains '"style_tweaks",' "$SYNC_STATE"
+assert_contains '"kopt_zoom_factor",' "$SYNC_STATE"
+assert_contains 'copy_document_settings(record, stored)' "$SYNC_STATE"
+assert_contains 'save_document_settings(settings, record)' "$SYNC_STATE"
+assert_contains 'settings:saveSetting(field, value)' "$SYNC_STATE"
 
 # Lightweight behavior check with a fake reader. Using the host C library as
 # the preload target keeps the dynamic loader quiet while letting us inspect
