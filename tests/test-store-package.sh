@@ -54,7 +54,7 @@ manifest = tomllib.loads((root / "manifest.toml").read_text(encoding="utf-8"))
 assert bundle["app_id"] == manifest["id"] == "koreader"
 assert bundle["schema"] == 1
 assert bundle["package"] == manifest["package"] == "koreader-for-remagic"
-assert bundle["version"] == manifest["version"] == "2026.3.0-remagic.11"
+assert bundle["version"] == manifest["version"] == "2026.3.0-remagic.12"
 assert bundle["manifest_path"] == "manifest.toml"
 assert len(bundle["content_id"]) == 64
 int(bundle["content_id"], 16)

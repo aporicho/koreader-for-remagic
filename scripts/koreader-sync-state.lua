@@ -104,6 +104,8 @@ local function record_from_file(path)
         last_xpointer = type(stored.last_xpointer) == "string" and stored.last_xpointer or nil,
         last_page = type(stored.last_page) == "number" and stored.last_page or nil,
         percent_finished = type(stored.percent_finished) == "number" and stored.percent_finished or nil,
+        copt_font_size = type(stored.copt_font_size) == "number" and stored.copt_font_size or nil,
+        kopt_font_size = type(stored.kopt_font_size) == "number" and stored.kopt_font_size or nil,
         bookmarks = copy_bookmarks(stored.annotations),
     }
 end
@@ -173,6 +175,12 @@ local function import_state()
             end
             if safe_number(record.percent_finished, 0, 1) then
                 settings:saveSetting("percent_finished", record.percent_finished)
+            end
+            if safe_number(record.copt_font_size, 1, 200) then
+                settings:saveSetting("copt_font_size", record.copt_font_size)
+            end
+            if safe_number(record.kopt_font_size, 0.1, 20) then
+                settings:saveSetting("kopt_font_size", record.kopt_font_size)
             end
 
             local annotations = settings:readSetting("annotations") or {}

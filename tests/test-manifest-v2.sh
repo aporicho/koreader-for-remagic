@@ -15,7 +15,7 @@ manifest = tomllib.loads(path.read_text(encoding="utf-8"))
 assert manifest["schema"] == 2
 assert manifest["id"] == "koreader"
 assert manifest["name"] == "KOReader"
-assert manifest["version"] == "2026.3.0-remagic.11"
+assert manifest["version"] == "2026.3.0-remagic.12"
 assert manifest["kind"] == "user"
 assert manifest["package"] == "koreader-for-remagic"
 assert manifest["supported_devices"] == ["paper_pro", "paper_pro_move"]
@@ -55,7 +55,7 @@ sync_provider = manifest["sync_provider"]
 assert sync_provider["schema"] == 1
 assert sync_provider["exporter"].endswith("/koreader-sync-state")
 assert sync_provider["importer"].endswith("/koreader-sync-state")
-assert sync_provider["data_kinds"] == ["reading_progress", "bookmarks"]
+assert sync_provider["data_kinds"] == ["reading_progress", "bookmarks", "font_size"]
 assert sync_provider["timeout_ms"] == 30_000
 
 runtime = manifest["runtime"]
