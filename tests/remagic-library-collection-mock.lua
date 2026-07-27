@@ -290,13 +290,12 @@ if mode == "invalid_index" then
     print("collection mock passed: " .. mode)
     return
 end
-if last_collection_items[local_one] then
-    fail("local library scan blocked the first collection frame")
-end
 drain_scheduled()
-equal(collection_refresh_count, 1, "local scan refresh count")
-equal(last_collection_items[official_one], "论语（官方）.epub", "official collision label")
-equal(last_collection_items[local_one], "论语（本地）.epub", "local collision label")
+equal(collection_refresh_count, 0, "legacy local scan refresh count")
+equal(last_collection_items[official_one], "论语.epub", "official label")
+if last_collection_items[local_one] then
+    fail("legacy local library item entered the managed collection")
+end
 equal(last_collection_items[official_two], "孟子.epub", "friendly official name")
 if ReadCollection.coll[collection_name][official_missing] then
     fail("unmapped official UUID leaked into the collection")

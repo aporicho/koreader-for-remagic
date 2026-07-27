@@ -11,13 +11,58 @@ local DocSettings = require("docsettings")
 
 local operation, exchange_file = arg[1], arg[2]
 local books_root = assert(os.getenv("KOREADER_BOOKS_DIR"), "KOREADER_BOOKS_DIR is required")
+local source_root = os.getenv("KOREADER_SOURCE_LIBRARY_DIR") or books_root
+local library_root = os.getenv("KOREADER_LIBRARY_DIR")
 local data_root = assert(os.getenv("KOREADER_DATA_DIR"), "KOREADER_DATA_DIR is required")
+local document_roots = { books_root, source_root, library_root }
+local supported_extensions = {
+    epub = true,
+    pdf = true,
+    djvu = true,
+    djv = true,
+    mobi = true,
+    azw3 = true,
+    fb2 = true,
+    cbz = true,
+    cbr = true,
+    txt = true,
+}
+
+local function direct_child(root, path)
+    if type(root) ~= "string" or root == "" then
+        return nil
+    end
+    root = root:gsub("/+$", "")
+    if root == "" then
+        root = "/"
+    end
+    local prefix = root == "/" and "/" or (root .. "/")
+    if path:sub(1, #prefix) ~= prefix then
+        return nil
+    end
+    local relative = path:sub(#prefix + 1)
+    if relative == "" or relative:find("/", 1, true) then
+        return nil
+    end
+    return relative
+end
+
+local function has_supported_extension(filename)
+    local extension = filename:match("%.([^.]+)$")
+    return extension and supported_extensions[extension:lower()] == true
+end
 
 local function is_book_path(path)
-    return type(path) == "string"
-        and path:sub(1, #books_root + 1) == books_root .. "/"
-        and not path:find("/../", 1, true)
-        and path:sub(-3) ~= "/.."
+    if type(path) ~= "string" or path:find("/../", 1, true) or path:sub(-3) == "/.." then
+        return false
+    end
+    for _, root in ipairs(document_roots) do
+        local child = direct_child(root, path)
+        if child and has_supported_extension(child) then
+            return true
+        end
+    end
+    return false
 end
 
 local function is_regular(path)

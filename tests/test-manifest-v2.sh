@@ -15,7 +15,7 @@ manifest = tomllib.loads(path.read_text(encoding="utf-8"))
 assert manifest["schema"] == 2
 assert manifest["id"] == "koreader"
 assert manifest["name"] == "KOReader"
-assert manifest["version"] == "2026.3.0-remagic.9"
+assert manifest["version"] == "2026.3.0-remagic.11"
 assert manifest["kind"] == "user"
 assert manifest["package"] == "koreader-for-remagic"
 assert manifest["supported_devices"] == ["paper_pro", "paper_pro_move"]
@@ -32,7 +32,6 @@ assert manifest["capabilities"] == [
 ]
 assert manifest["supports_open_path"] is True
 assert manifest["allowed_open_roots"] == [
-    "/home/root/books",
     "/home/root/.local/share/koreader-for-remagic/library",
     "/home/root/.local/share/remarkable/xochitl",
 ]
@@ -72,7 +71,7 @@ assert manifest["environment"] == {
     "KO_HOME": "/home/root/.local/share/koreader-for-remagic/data",
     "KOREADER_DATA_DIR": "/home/root/.local/share/koreader-for-remagic/data",
     "KOREADER_SETTINGS": "/home/root/.local/share/koreader-for-remagic/data/settings.reader.lua",
-    "KOREADER_BOOKS_DIR": "/home/root/books",
+    "KOREADER_BOOKS_DIR": "/home/root/.local/share/remarkable/xochitl",
     "KOREADER_SOURCE_LIBRARY_DIR": "/home/root/.local/share/remarkable/xochitl",
     "KOREADER_LIBRARY_STATE_ROOT": "/home/root/.local/share/koreader-for-remagic",
     "KOREADER_LIBRARY_DIR": "/home/root/.local/share/koreader-for-remagic/library",

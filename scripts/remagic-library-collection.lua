@@ -11,15 +11,12 @@ local function install(options)
     local ReadCollection = assert(options.ReadCollection)
     local ReaderUI = assert(options.ReaderUI)
     local UIManager = assert(options.UIManager)
-    local DocumentRegistry = assert(options.DocumentRegistry)
     local ffiUtil = assert(options.ffiUtil)
     local lfs = assert(options.lfs)
     local logger = assert(options.logger)
-    local new_local_scan = assert(options.new_local_scan)
 
     local collection_name = assert(options.collection_name)
     local library_dir = assert(options.library_dir)
-    local books_dir = assert(options.books_dir)
     local source_dir = assert(options.source_dir)
     local index_file = assert(options.index_file)
     local initial_open_path = options.initial_open_path
@@ -45,10 +42,8 @@ local function install(options)
     end
 
     library_dir = normalize_root(library_dir)
-    books_dir = normalize_root(books_dir)
     source_dir = normalize_root(canonical(source_dir))
     local library_root = normalize_root(canonical(library_dir))
-    local books_root = normalize_root(canonical(books_dir))
 
     local function is_within(path, root)
         path = canonical(path)
@@ -89,12 +84,8 @@ local function install(options)
         end
 
         for line in handle:lines() do
-            local uuid, extension, filename = line:match(
-                "^([0-9A-Fa-f%-]+)\t(epub)\t([^\t\r\n]+)$")
-            if not uuid then
-                uuid, extension, filename = line:match(
-                    "^([0-9A-Fa-f%-]+)\t(pdf)\t([^\t\r\n]+)$")
-            end
+            local uuid, extension, filename =
+                line:match("^([0-9A-Fa-f%-]+)\t([A-Za-z0-9]+)\t([^\t\r\n]+)$")
             if uuid and #uuid == 36 and filename ~= "" and not filename:find("/", 1, true) then
                 local source = canonical(source_dir .. "/" .. uuid .. "." .. extension)
                 mapping[source] = filename
@@ -131,9 +122,6 @@ local function install(options)
                     -- is available again.
                     text = item.text or basename(file)
                 end
-            elseif is_within(file, books_root) then
-                text = basename(file)
-                source = "本地"
             else
                 text = basename(file) or item.text
                 source = "其他"
@@ -236,21 +224,6 @@ local function install(options)
         local ok, err = pcall(collections.updateItemTable, collections)
         if not ok then log("warn", "refresh-failed error=" .. tostring(err)) end
     end
-
-    local start_local_scan = new_local_scan({
-        UIManager = UIManager,
-        DocumentRegistry = DocumentRegistry,
-        lfs = lfs,
-        books_root = books_root,
-        canonical = canonical,
-        is_within = is_within,
-        get_collection = function() return ReadCollection.coll[collection_name] end,
-        add_item = add_item,
-        decorate = decorate_collection,
-        write = function() ReadCollection:write({ [collection_name] = true }) end,
-        refresh = refresh_open_collection,
-        log = log,
-    })
 
     local function show_read_only(path)
         log("warn", "official-library-read-only path=" .. tostring(path))
@@ -356,7 +329,6 @@ local function install(options)
         if friendly_by_source[file] then
             return library_dir .. "/" .. friendly_by_source[file]
         end
-        if is_within(file, books_root) then return file end
         return nil
     end
 
@@ -369,8 +341,6 @@ local function install(options)
         open_collection()
         return unpack_values(results, 1, results.n)
     end
-
-    start_local_scan()
 
     return {
         collection_name = collection_name,

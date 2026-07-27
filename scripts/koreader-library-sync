@@ -114,7 +114,7 @@ while IFS="$tab" read -r uuid extension filename; do
         ''|*[!0-9A-Fa-f-]*) fail "invalid UUID emitted by indexer" ;;
     esac
     case "$extension" in
-        epub|pdf) ;;
+        epub|pdf|djvu|djv|mobi|azw3|fb2|cbz|cbr|txt) ;;
         *) fail "invalid extension emitted by indexer" ;;
     esac
     case "$filename" in

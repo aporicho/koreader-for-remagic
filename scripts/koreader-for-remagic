@@ -7,8 +7,8 @@ KOREADER_DIR=${KOREADER_DIR:-}
 QTFB_SHIM=${QTFB_SHIM:-/home/root/apps/remagic/shims/qtfb-shim.so}
 KOREADER_READER=${KOREADER_READER:-$KOREADER_DIR/reader.lua}
 KOREADER_DATA_DIR=${KOREADER_DATA_DIR:-${KO_HOME:-/home/root/.local/share/koreader-for-remagic/data}}
-KOREADER_BOOKS_DIR=${KOREADER_BOOKS_DIR:-/home/root/books}
 KOREADER_SOURCE_LIBRARY_DIR=${KOREADER_SOURCE_LIBRARY_DIR:-/home/root/.local/share/remarkable/xochitl}
+KOREADER_BOOKS_DIR=${KOREADER_BOOKS_DIR:-$KOREADER_SOURCE_LIBRARY_DIR}
 KOREADER_LIBRARY_STATE_ROOT=${KOREADER_LIBRARY_STATE_ROOT:-/home/root/.local/share/koreader-for-remagic}
 KOREADER_LIBRARY_DIR=${KOREADER_LIBRARY_DIR:-/home/root/.local/share/koreader-for-remagic/library}
 KOREADER_LIBRARY_INDEX=${KOREADER_LIBRARY_INDEX:-$KOREADER_LIBRARY_STATE_ROOT/library.index}
@@ -167,7 +167,7 @@ export REMAGIC_MANAGED="${REMAGIC_MANAGED:-1}"
 export REMAGIC_APP_ID="${REMAGIC_APP_ID:-koreader}"
 export REMAGIC_KOREADER_FLOCK="${REMAGIC_KOREADER_FLOCK:-$KOREADER_INSTALL_FLOCK}"
 export REMAGIC_KOREADER_LIBEXEC_DIR="$KOREADER_LIBEXEC_DIR"
-export REMAGIC_ALLOWED_OPEN_ROOTS="${REMAGIC_ALLOWED_OPEN_ROOTS:-${KOREADER_ALLOWED_OPEN_ROOTS:-/home/root/books:/home/root/.local/share/koreader-for-remagic/library:/home/root/.local/share/remarkable/xochitl}}"
+export REMAGIC_ALLOWED_OPEN_ROOTS="${REMAGIC_ALLOWED_OPEN_ROOTS:-${KOREADER_ALLOWED_OPEN_ROOTS:-/home/root/.local/share/koreader-for-remagic/library:/home/root/.local/share/remarkable/xochitl}}"
 # Bind lifecycle identity to the wrapper process known by Manager.
 export REMAGIC_APP_PID="$$"
 
@@ -381,17 +381,16 @@ select_library_dir() {
             "$KOREADER_SETTINGS" | sed -n '$p')
     fi
 
-    # Restore only directories inside the primary books tree or the generated
-    # friendly view. This prevents UUID files and .thumbnails from the xochitl
-    # store leaking into KOReader's file manager.
+    # Restore only directories inside the generated friendly view or official
+    # xochitl library. Stale legacy /home/root/books history is ignored.
     if [ -n "$lastdir" ] && directory_has_entries "$lastdir"; then
         case "$lastdir/" in
-            "$KOREADER_BOOKS_DIR/"|"$KOREADER_BOOKS_DIR/"*)
+            "$KOREADER_LIBRARY_DIR/"|"$KOREADER_LIBRARY_DIR/"*)
                 echo "KOReader: library_dir=$lastdir source=lastdir" >&2
                 printf '%s\n' "$lastdir"
                 return
                 ;;
-            "$KOREADER_LIBRARY_DIR/"|"$KOREADER_LIBRARY_DIR/"*)
+            "$KOREADER_SOURCE_LIBRARY_DIR/"|"$KOREADER_SOURCE_LIBRARY_DIR/"*)
                 echo "KOReader: library_dir=$lastdir source=lastdir" >&2
                 printf '%s\n' "$lastdir"
                 return
@@ -403,8 +402,8 @@ select_library_dir() {
         echo "KOReader: library_dir=$KOREADER_LIBRARY_DIR source=friendly-fallback" >&2
         printf '%s\n' "$KOREADER_LIBRARY_DIR"
     else
-        echo "KOReader: library_dir=$KOREADER_BOOKS_DIR source=empty-fallback" >&2
-        printf '%s\n' "$KOREADER_BOOKS_DIR"
+        echo "KOReader: library_dir=$KOREADER_SOURCE_LIBRARY_DIR source=official-fallback" >&2
+        printf '%s\n' "$KOREADER_SOURCE_LIBRARY_DIR"
     fi
 }
 

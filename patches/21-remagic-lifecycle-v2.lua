@@ -288,7 +288,7 @@ local open_path = new_open_path({
     FileManager = FileManager,
     ReaderUI = ReaderUI,
     allowed_roots = os.getenv("REMAGIC_ALLOWED_OPEN_ROOTS")
-        or "/home/root/.local/share/koreader-for-remagic/library:/home/root/books:/home/root/koreader:/home/root/.local/share/remarkable/xochitl",
+        or "/home/root/.local/share/koreader-for-remagic/library:/home/root/.local/share/remarkable/xochitl",
     get_ready_reason = function() return next_ready_reason end,
     set_ready_reason = function(value) next_ready_reason = value end,
     emit_failed = function(reason)

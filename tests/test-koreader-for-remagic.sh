@@ -4,6 +4,7 @@ set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 WRAPPER=$ROOT/scripts/koreader-for-remagic
 ADAPTER_MANIFEST=$ROOT/manifests/koreader.toml
+SYNC_STATE=$ROOT/scripts/koreader-sync-state.lua
 TMPDIR_TEST=$(mktemp -d)
 trap 'rm -rf "$TMPDIR_TEST"' EXIT HUP INT TERM
 export KOREADER_PLATFORM_PATCH_DIR=$ROOT/patches
@@ -60,6 +61,9 @@ assert_contains "EXT_FONT_DIR=\$(printf '%s' \"\$KOREADER_FONT_DIRECTORIES\" | t
 if grep -F 'KO_MULTIUSER' "$WRAPPER" "$ADAPTER_MANIFEST" >/dev/null; then
     fail "KO_MULTIUSER must not split state away from /home/root/apps/koreader"
 fi
+assert_contains 'local supported_extensions = {' "$SYNC_STATE"
+assert_contains 'relative:find("/", 1, true)' "$SYNC_STATE"
+assert_contains 'has_supported_extension(child)' "$SYNC_STATE"
 
 # Lightweight behavior check with a fake reader. Using the host C library as
 # the preload target keeps the dynamic loader quiet while letting us inspect
@@ -327,9 +331,8 @@ KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
 assert_contains "argc=1 arg1=$LIBRARY_DIR_TEST" "$TRACE"
 assert_contains "KOReader: library_dir=$LIBRARY_DIR_TEST source=friendly-fallback" "$WRAPPER_LOG"
 
-# A non-empty remembered manual directory remains valid; the adapter only
-# rejects stale or empty history and never forces the official view over an
-# intentional /books location.
+# A non-empty remembered legacy books directory is still ignored; xochitl is
+# the single source of books and the friendly official view remains primary.
 : >"$BOOKS_LAST_DIR_TEST/手动书籍.epub"
 cat >"$SETTINGS_TEST" <<EOF
 return {
@@ -341,8 +344,8 @@ TEST_STATE=$STATE TEST_TRACE=$TRACE \
 KOREADER_DIR=$KOREADER_DIR_TEST QTFB_SHIM=$HOST_PRELOAD \
 KOREADER_LIBRARY_DIR=$LIBRARY_DIR_TEST KOREADER_SETTINGS=$SETTINGS_TEST \
     "$WRAPPER" 2>"$WRAPPER_LOG"
-assert_contains "argc=1 arg1=$BOOKS_LAST_DIR_TEST" "$TRACE"
-assert_contains "KOReader: library_dir=$BOOKS_LAST_DIR_TEST source=lastdir" "$WRAPPER_LOG"
+assert_contains "argc=1 arg1=$LIBRARY_DIR_TEST" "$TRACE"
+assert_contains "KOReader: library_dir=$LIBRARY_DIR_TEST source=friendly-fallback" "$WRAPPER_LOG"
 
 rm -f "$STATE" "$TRACE"
 BOOK_PATH="$TMPDIR_TEST/一本 有空格的书.epub"

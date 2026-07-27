@@ -87,6 +87,19 @@ local function file_exists(path)
     return true
 end
 
+local supported_extensions = {
+    "epub",
+    "pdf",
+    "djvu",
+    "djv",
+    "mobi",
+    "azw3",
+    "fb2",
+    "cbz",
+    "cbr",
+    "txt",
+}
+
 local function utf8_prefix(value, maximum)
     local chunks = {}
     local length = 0
@@ -167,10 +180,11 @@ for index = 2, #arg do
         local metadata = read_metadata(metadata_path)
         if metadata.type == "DocumentType" and metadata.deleted ~= true then
             local extension
-            if file_exists(source_dir .. "/" .. uuid .. ".epub") then
-                extension = ".epub"
-            elseif file_exists(source_dir .. "/" .. uuid .. ".pdf") then
-                extension = ".pdf"
+            for _, candidate in ipairs(supported_extensions) do
+                if file_exists(source_dir .. "/" .. uuid .. "." .. candidate) then
+                    extension = "." .. candidate
+                    break
+                end
             end
             if extension then
                 records[#records + 1] = {

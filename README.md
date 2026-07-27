@@ -36,8 +36,8 @@ ReMagic 构建时校验官方压缩包和完整文件清单，并把 vendor 作�
   同时隐藏由 ReMagic 接管的 OTA；
 - `21-remagic-lifecycle-v2.lua`：提供语义 ready、保存、前后台、同 PID 开书和
   优雅关闭；
-- `22-remagic-library-collection.lua`：把官方友好书库与 `/home/root/books` 投影到
-  KOReader 原生“全部书籍”集合，并保护官方 UUID 文件不被修改。
+- `22-remagic-library-collection.lua`：把官方 xochitl 书库投影到 KOReader 原生
+  “全部书籍”集合，并保护官方 UUID 文件不被修改。
 
 补丁由 wrapper 原子同步到 KO_HOME；旧版 ReMagic 平台补丁会被精确清理，用户的
 其他 patch 和 plugin 不受影响。
@@ -74,7 +74,7 @@ systemd cgroup。召回时先解冻，再发送带新 foreground epoch 和 lease
 `REMAGIC_LIFECYCLE_FD`。协议为单行 JSON v2：
 
 ```json
-{"protocol":2,"request_id":"...","body":{"command":"open_path","app_id":"koreader","generation":1,"foreground_epoch":2,"lease_id":3,"path":"/home/root/books/book.epub"}}
+{"protocol":2,"request_id":"...","body":{"command":"open_path","app_id":"koreader","generation":1,"foreground_epoch":2,"lease_id":3,"path":"/home/root/.local/share/remarkable/xochitl/<uuid>.epub"}}
 ```
 
 支持 `start`、`enter_background`、`enter_foreground`、`open_path` 和 `shutdown`。
@@ -99,9 +99,9 @@ wrapper 只复现上游脚本安全的 `/tmp/koreader.sh` 同步步骤。返回�
 每次启动会从 reMarkable `.metadata` 原子生成友好书库视图：优先链接 EPUB，其次
 PDF，不修改、移动或删除 xochitl 文件。无参数冷启动进入 KOReader 原生“全部书籍”
 集合。该集合是适配器维护的索引投影，不注册 KOReader 的同步扫描文件夹：官方索引
-直接复用已生成的确定性映射，本地 `/home/root/books` 在首帧之后按固定小批次遍历，
-每批之间归还 UI 控制权。因此书库大小不会阻塞首次绘制、触摸或生命周期 ready，
-也不会留下周期性后台扫描。空的历史目录不会遮住已有书籍。
+直接复用已生成的确定性映射，不再合并 `/home/root/books` 旧书库。因此书库大小不会
+阻塞首次绘制、触摸或生命周期 ready，也不会留下周期性后台扫描。空的历史目录不会
+遮住已有书籍。
 集合显示友好中文书名，但保持官方 UUID 文件身份以延续阅读进度。`read 书名` 可以
 通过 `open_path` 在同一个驻留 PID 中直接开书，不经过集合首页。初次排版大型 EPUB
 可能超过 20 秒，因此 KOReader 单独拥有 60 秒语义就绪预算；普通启动仍在真实首帧
